@@ -44,14 +44,14 @@ int parseOptions(int argc, char* argv[]){
   po::options_description generic("Generic options");
   generic.add_options()
     ("help,h", "Produce help message")
-    ("config,c", po::value<std::string>(&config_file)->default_value(argv[0].append(CONFIG_FILE_DEFAULT)), "Different configuration file.")
+    ("config,c", po::value<std::string>(&config_file)->default_value(CONFIG_FILE_DEFAULT), "Different configuration file.")
     ;
   
   // Options that are allowed both on command line and in the config file
   po::options_description config("Configuration");
   config.add_options()
-    ("framerate", po::value<double>(), "set framerate (fps)")
-    ("exposure", po::value<double>(), "set exposure time (ms)")
+    ("framerate,f", po::value<double>(), "set framerate (fps)")
+    ("exposure,e", po::value<double>(), "set exposure time (ms)")
     ;
   
   po::options_description cmdline_options;
@@ -67,23 +67,28 @@ int parseOptions(int argc, char* argv[]){
   notify(vm);
 
   std::ifstream ifs(config_file.c_str());
-  if (!ifs){
-    cout << "can't open config file: " << config_file << endl;
-    return 2;
-  }
+  // if (!ifs){
+  //   cout << "can't open config file: " << config_file << endl;
+  //   return 2;
+  // }
+  // else
+  //   {
+  //     store(parse_config_file(ifs, config_file_options), vm);
+  //     notify(vm);
+  //   }
 
-  // if (vm.count("help")) {
-  //   cout << generic << "\n";
-  //   return 1;
-  // }
-  // if (vm.count("framerate")){
-  //   cout << "Custom framerate set." << endl;
-  //   camOptions.framerate = vm["framerate"].as<double>();
-  // }
-  // if (vm.count("exposure")){
-  //   cout << "Custom exposure set." << endl;
-  //   camOptions.exposure = vm["exposure"].as<double>();
-  // }
+  if (vm.count("help")) {
+    cout << cmdline_options << "\n";
+    return 1;
+  }
+  if (vm.count("framerate")){
+    cout << "Custom framerate set." << endl;
+    camOptions.framerate = vm["framerate"].as<double>();
+  }
+  if (vm.count("exposure")){
+    cout << "Custom exposure set." << endl;
+    camOptions.exposure = vm["exposure"].as<double>();
+  }
   return 0;
 }
 
@@ -99,6 +104,9 @@ int main(int argc, char* argv[]){
   case IS_SUCCESS:
     std::cout << "Camera " << camHandle << " initialized!" << std::endl;
     break;
+  case IS_CANT_OPEN_DEVICE:
+    cout << "Error initializing, can't access the camera. Is it connected?" << endl;
+    return -1;
   default:
     std::cout << "Error initializing camera. Err no. " << cameraStatus << std::endl;
     return -1;
