@@ -1,0 +1,176 @@
+Compiling the C compiler identification source file "CMakeCCompilerId.c" failed.
+Compiler: /usr/bin/cc 
+Build flags: 
+Id flags: 
+
+The output was:
+1
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+Compiler: /usr/bin/c++ 
+Build flags: 
+Id flags: 
+
+The output was:
+1
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+
+
+Determining if the C compiler works failed with the following output:
+Change Dir: /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp
+
+Run Build Command:/usr/bin/make "cmTryCompileExec1137389061/fast"
+/usr/bin/make -f CMakeFiles/cmTryCompileExec1137389061.dir/build.make CMakeFiles/cmTryCompileExec1137389061.dir/build
+make[1]: Entering directory `/home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp'
+/usr/bin/cmake -E cmake_progress_report /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp/CMakeFiles 1
+Building C object CMakeFiles/cmTryCompileExec1137389061.dir/testCCompiler.c.o
+/usr/bin/cc    -o CMakeFiles/cmTryCompileExec1137389061.dir/testCCompiler.c.o   -c /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp/testCCompiler.c
+Linking C executable cmTryCompileExec1137389061
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTryCompileExec1137389061.dir/link.txt --verbose=1
+/usr/bin/cc       CMakeFiles/cmTryCompileExec1137389061.dir/testCCompiler.c.o  -o cmTryCompileExec1137389061 -rdynamic 
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+make[1]: *** [cmTryCompileExec1137389061] Error 1
+make[1]: Leaving directory `/home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp'
+make: *** [cmTryCompileExec1137389061/fast] Error 2
+
+
+Compiling the C compiler identification source file "CMakeCCompilerId.c" failed.
+Compiler: /usr/bin/cc 
+Build flags: 
+Id flags: 
+
+The output was:
+1
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+Compiler: /usr/bin/c++ 
+Build flags: 
+Id flags: 
+
+The output was:
+1
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+
+
+Determining if the C compiler works failed with the following output:
+Change Dir: /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp
+
+Run Build Command:/usr/bin/make "cmTryCompileExec4081886721/fast"
+/usr/bin/make -f CMakeFiles/cmTryCompileExec4081886721.dir/build.make CMakeFiles/cmTryCompileExec4081886721.dir/build
+make[1]: Entering directory `/home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp'
+/usr/bin/cmake -E cmake_progress_report /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp/CMakeFiles 1
+Building C object CMakeFiles/cmTryCompileExec4081886721.dir/testCCompiler.c.o
+/usr/bin/cc    -o CMakeFiles/cmTryCompileExec4081886721.dir/testCCompiler.c.o   -c /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp/testCCompiler.c
+Linking C executable cmTryCompileExec4081886721
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTryCompileExec4081886721.dir/link.txt --verbose=1
+/usr/bin/cc       CMakeFiles/cmTryCompileExec4081886721.dir/testCCompiler.c.o  -o cmTryCompileExec4081886721 -rdynamic 
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+make[1]: Leaving directory `/home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp'
+make[1]: *** [cmTryCompileExec4081886721] Error 1
+make: *** [cmTryCompileExec4081886721/fast] Error 2
+
+
+Compiling the C compiler identification source file "CMakeCCompilerId.c" failed.
+Compiler: /usr/bin/cc 
+Build flags: 
+Id flags: 
+
+The output was:
+1
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+Compiler: /usr/bin/c++ 
+Build flags: 
+Id flags: 
+
+The output was:
+1
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+
+
+Determining if the C compiler works failed with the following output:
+Change Dir: /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp
+
+Run Build Command:/usr/bin/make "cmTryCompileExec762720349/fast"
+/usr/bin/make -f CMakeFiles/cmTryCompileExec762720349.dir/build.make CMakeFiles/cmTryCompileExec762720349.dir/build
+make[1]: Entering directory `/home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp'
+/usr/bin/cmake -E cmake_progress_report /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp/CMakeFiles 1
+Building C object CMakeFiles/cmTryCompileExec762720349.dir/testCCompiler.c.o
+/usr/bin/cc    -o CMakeFiles/cmTryCompileExec762720349.dir/testCCompiler.c.o   -c /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp/testCCompiler.c
+Linking C executable cmTryCompileExec762720349
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTryCompileExec762720349.dir/link.txt --verbose=1
+/usr/bin/cc       CMakeFiles/cmTryCompileExec762720349.dir/testCCompiler.c.o  -o cmTryCompileExec762720349 -rdynamic 
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+make[1]: *** [cmTryCompileExec762720349] Error 1
+make[1]: Leaving directory `/home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp'
+make: *** [cmTryCompileExec762720349/fast] Error 2
+
+
+Compiling the C compiler identification source file "CMakeCCompilerId.c" failed.
+Compiler: /usr/bin/cc 
+Build flags: 
+Id flags: 
+
+The output was:
+1
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+Compiler: /usr/bin/c++ 
+Build flags: 
+Id flags: 
+
+The output was:
+1
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+
+
+Determining if the C compiler works failed with the following output:
+Change Dir: /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp
+
+Run Build Command:/usr/bin/make "cmTryCompileExec2419452147/fast"
+/usr/bin/make -f CMakeFiles/cmTryCompileExec2419452147.dir/build.make CMakeFiles/cmTryCompileExec2419452147.dir/build
+make[1]: Entering directory `/home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp'
+/usr/bin/cmake -E cmake_progress_report /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp/CMakeFiles 1
+Building C object CMakeFiles/cmTryCompileExec2419452147.dir/testCCompiler.c.o
+/usr/bin/cc    -o CMakeFiles/cmTryCompileExec2419452147.dir/testCCompiler.c.o   -c /home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp/testCCompiler.c
+Linking C executable cmTryCompileExec2419452147
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTryCompileExec2419452147.dir/link.txt --verbose=1
+/usr/bin/cc       CMakeFiles/cmTryCompileExec2419452147.dir/testCCompiler.c.o  -o cmTryCompileExec2419452147 -rdynamic 
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o: unrecognised relocation (0x2a) in section `.init'
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+make[1]: *** [cmTryCompileExec2419452147] Error 1
+make[1]: Leaving directory `/home/prunebutt/Documents/uni/masterthesis/workspace/frontend/CMakeFiles/CMakeTmp'
+make: *** [cmTryCompileExec2419452147/fast] Error 2
+
+

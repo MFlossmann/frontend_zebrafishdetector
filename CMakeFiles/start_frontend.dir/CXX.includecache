@@ -1,0 +1,24 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/prunebutt/Documents/uni/masterthesis/workspace/frontend/src/main.cpp
+iostream
+-
+stdio.h
+-
+string
+-
+opencv2/opencv.hpp
+-
+ueye.h
+-
+boost/program_options.hpp
+-
+fstream
+-
+
