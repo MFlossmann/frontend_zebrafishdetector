@@ -1,3 +1,11 @@
+/*
+Modeled after this homepage:
+https://en.ids-imaging.com/manuals/uEye_SDK/EN/uEye_Manual/index.html?is_initimagequeue.html
+
+current goal: video mode with freerun mode
+
+ */
+
 #include <iostream>
 #include <stdio.h>
 #include <string>
@@ -21,8 +29,11 @@ const int COLOR_DEPTH = 8;
 const int COLOR_DEPTH_CV = CV_8UC1;
 const double DEFAULT_FRAMERATE = 30.0;
 const double DEFAULT_EXPOSURE_MS = 4;
+const int IMAGE_TIMEOUT = 500;
+const int TIMEOUT_COUNTER_MAX = 10;
 
-const int BUFFER_AMOUNT = 1;
+
+const int BUFFER_AMOUNT = 2;
 
 //////////////////// structs
 struct cameraOptions{
@@ -92,6 +103,10 @@ int parseOptions(int argc, char* argv[]){
   return 0;
 }
 
+int installEventHandler(HIDS camHandle){
+
+}
+
 int main(int argc, char* argv[]){
 // return if --help option was called
   if (parseOptions(argc, argv))
@@ -105,19 +120,19 @@ int main(int argc, char* argv[]){
     std::cout << "Camera " << camHandle << " initialized!" << std::endl;
     break;
   case IS_CANT_OPEN_DEVICE:
-    cout << "Error initializing, can't access the camera. Is it connected?" << endl;
+    cout << "Error initializing, can't access the camera. Is it connected?\n Are you sure, it has power?" << endl;
     return -1;
   default:
     std::cout << "Error initializing camera. Err no. " << cameraStatus << std::endl;
     return -1;
   } // switch cameraStatus
 
+
   //////////////////// Set camera options
-  
   // Framerate
   cameraStatus = is_SetFrameRate(camHandle,
-				 camOptions.framerate,
-				 &camOptions.framerateEff);
+                                 camOptions.framerate,
+                                 &camOptions.framerateEff);
   switch (cameraStatus){
   case IS_SUCCESS:
     cout << "Framerate was set to " << camOptions.framerate		\
@@ -130,17 +145,21 @@ int main(int argc, char* argv[]){
 
   // Exposure time set to specific value
   cameraStatus = is_Exposure(camHandle,
-	      IS_EXPOSURE_CMD_SET_EXPOSURE,
-	      &camOptions.exposure,
-	      sizeof(camOptions.exposure));
+                             IS_EXPOSURE_CMD_SET_EXPOSURE,
+                             &camOptions.exposure,
+                             sizeof(camOptions.exposure));
   switch (cameraStatus){
   case IS_SUCCESS:
     cout << "Exposure time set to " << camOptions.exposure	\
-	 << "ms." << endl;  
+         << "ms." << endl;
     break;
   default:
     cout << "Error setting exposure time. Err no. " << cameraStatus << endl;
   }
+
+  // Color depth
+  is_SetColorMode(camHandle,
+                  IS_CM_MONO8);
   
 
   //////////////////// Init the image buffers
@@ -151,50 +170,95 @@ int main(int argc, char* argv[]){
   imgPtrList.resize(BUFFER_AMOUNT);
   imgIdList.resize(BUFFER_AMOUNT);
 
+
+  is_SetDisplayMode(camHandle, IS_SET_DM_DIB); // TODO: Where to put this?
+
   for (int i = 0; i < BUFFER_AMOUNT; i++){
     // Allocate memory for the bitmap-image
-    bool error = IS_SUCCESS != is_AllocImageMem(camHandle,
-						IMAGE_WIDTH,
-						IMAGE_HEIGHT,
-						COLOR_DEPTH,
-						&imgPtrList[i],
-						&imgIdList[i]);
-    // TODO: Check, whether this is actually necessary at the beginning.
-    /*    error |= IS_SUCCESS != is_SetImageMem(camHandle,
-					  imgPtrList[i],
-					  imgIdList[i]);*/
-    if (error){
-      std::cout << "Failed to initialize image buffer" << i << "." << std::endl;
+    int status = is_AllocImageMem(camHandle,
+                                  IMAGE_WIDTH,
+                                  IMAGE_HEIGHT,
+                                  COLOR_DEPTH,
+                                  &imgPtrList[i],
+                                  &imgIdList[i]);
+
+    status |= is_AddToSequence(camHandle,
+                               imgPtrList[i],
+                               imgIdList[i]);
+
+    if (status != IS_SUCCESS){
+      std::cout << "Failed to initialize image buffer" << i \
+                << ". Error: " << status << std::endl;
       return -1;
     }
 
-    std::cout << "Image buffer " << i << " allocated." << std::endl;
+    std::cout << "Image buffer " << i << " allocated and added to the sequence." << std::endl;
   }
 
-  is_SetDisplayMode(camHandle, IS_SET_DM_DIB);
-  is_SetImageMem(camHandle, imgPtrList[0], imgIdList[0]); // activate the imagebuffer
+  // Activate the image queue TODO: necessary?
+  // is_InitImageQueue(camHandle,
+  //                   0); // 0 is the only nMode supported
+
+
+// enable the event that a new image is available
+  is_EnableEvent(camHandle,
+                 IS_SET_EVENT_FRAME);
+
+  // enable video capturing
+  is_CaptureVideo(camHandle, IS_WAIT);
 
   do {
-  // Get the image
-  is_FreezeVideo(camHandle, IS_WAIT);
+
+    char* currentImgPtr = 0;
+    int currentImgIndex = -1;
+
+//////////////////// Capture the image
+    {
+      int timeoutCounter = 0;
+      int captureStatus;
+      do{
+        // TODO: This function fails (IS_NO_SUCCESS)
+        captureStatus = is_WaitForNextImage(camHandle,
+                                            IMAGE_TIMEOUT,
+                                            &currentImgPtr,
+                                            &currentImgIndex);
+
+        if (captureStatus != IS_TIMED_OUT &&
+            captureStatus != IS_SUCCESS){
+          cout << "Error capturing image! Error code: " << captureStatus << endl;
+          break;
+        }
+      }
+      while (captureStatus != IS_TIMED_OUT ||
+             ++timeoutCounter >= TIMEOUT_COUNTER_MAX);
+
+      if (timeoutCounter >= TIMEOUT_COUNTER_MAX)
+        cout << "Image timeout!" << endl;
+    }
+
+//////////////////// Copy the image buffer
 
 #ifdef _COPY_IMAGE_BUFFER_ // deepcopy the whole matrix
-  // copy the image memory to the openCV memory
-  is_CopyImageMem(camHandle,
-		  imgPtrList[0],
-		  imgIdList[0],
-		  (char*)image.data);
+    // copy the image memory to the openCV memory
+    is_CopyImageMem(camHandle,
+                    currentImgPtr,
+                    currentImgIndex,
+                    (char*)image.data);
 #else // only copy the pointer
-  image.data = (uchar*) imgPtrList[0];
+    image.data = (uchar*) currentImgPtr;
 #endif
 
-  cv::namedWindow("Display Image", CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
-  cv::imshow("Display Image", image);
+    cv::namedWindow("Display Image", CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
+    cv::imshow("Display Image", image);
 
-  }
-  while(cv::waitKey((int) (1000.0 / camOptions.framerateEff)) == -1);
-  
-  //    is_SetDisplayMode(camHandle, );
+  }while(cv::waitKey((int) (1000.0 / camOptions.framerateEff)) == -1);
+
+//////////////////// Cleanup and exit
+
+  //TODO: Return variables
+  is_StopLiveVideo(camHandle,
+                   IS_FORCE_VIDEO_STOP);
+  is_ClearSequence(camHandle);
   
   // Free image buffers
   for (int i=0; i < BUFFER_AMOUNT; i++){
@@ -202,8 +266,12 @@ int main(int argc, char* argv[]){
   }
   imgPtrList.clear();
   imgIdList.clear();
-  
-  is_ExitCamera(camHandle); // close the camera
+
+  // Close events, buffers, queues and camera
+  is_DisableEvent(camHandle,IS_SET_EVENT_FRAME);
+  is_ExitImageQueue(camHandle);
+  is_ClearSequence(camHandle);
+  is_ExitCamera(camHandle);
   std::cout << "Camera " << camHandle << " closed!" << std::endl;
 
   return 0;
