@@ -103,8 +103,35 @@ int parseOptions(int argc, char* argv[]){
   return 0;
 }
 
-int installEventHandler(HIDS camHandle){
+void parseCaptureStatus(UEYE_CAPTURE_STATUS_INFO CaptureStatusInfo){
+  cout << "The following errors occured:" << endl;
 
+  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_API_NO_DEST_MEM])
+    cout << "\tNo destination memory for copying." << endl;
+
+  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_API_CONVERSION_FAILED])
+    cout << "\tCurrent image could'nt be processed correctly." << endl;
+
+  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_API_IMAGE_LOCKED])
+    cout << "\tDestination buffers are locked." << endl;
+
+  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_DRV_OUT_OF_BUFFERS])
+    cout << "\tNo free internal image memory available to the driver." << endl;
+
+  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_DRV_DEVICE_NOT_READY])
+    cout << "\tCamera no longer available." << endl;
+
+  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_USB_TRANSFER_FAILED])
+    cout << "\tImage wasn't transferred over the USB bus." << endl; // technically shouldn't be possible with the Gige Ueye
+
+  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_DEV_TIMEOUT])
+    cout << "\tThe device reached a timeout." << endl;
+
+  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_ETH_BUFFER_OVERRUN])
+    cout << "\tThe sensor transfers more data than the internal camera memory can accomodate." << endl;
+
+  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_ETH_MISSED_IMAGES])
+    cout << "\tFreerun mode: The GigE uEye camera could neither process nor output an image captured by the sensor.\n\tHardware trigger mode: The GigE uEye camera received a hardware trigger signal which could not be processed because the sensor was still busy." << endl;
 }
 
 int main(int argc, char* argv[]){
@@ -129,6 +156,10 @@ int main(int argc, char* argv[]){
 
 
   //////////////////// Set camera options
+  // Trigger mode
+  is_SetExternalTrigger(camHandle,
+                        IS_SET_TRIGGER_SOFTWARE); // Set to SW trigger for freerun mode
+
   // Framerate
   cameraStatus = is_SetFrameRate(camHandle,
                                  camOptions.framerate,
@@ -196,8 +227,8 @@ int main(int argc, char* argv[]){
   }
 
   // Activate the image queue TODO: necessary?
-  // is_InitImageQueue(camHandle,
-  //                   0); // 0 is the only nMode supported
+  is_InitImageQueue(camHandle,
+                     0); // 0 is the only nMode supported
 
 
 // enable the event that a new image is available
@@ -223,14 +254,30 @@ int main(int argc, char* argv[]){
                                             &currentImgPtr,
                                             &currentImgIndex);
 
-        if (captureStatus != IS_TIMED_OUT &&
-            captureStatus != IS_SUCCESS){
-          cout << "Error capturing image! Error code: " << captureStatus << endl;
+        switch(captureStatus){
+        case IS_TIMED_OUT:
+        case IS_SUCCESS:
           break;
+        case IS_CAPTURE_STATUS:   // Specific error
+          UEYE_CAPTURE_STATUS_INFO CaptureStatusInfo;
+          is_CaptureStatus(camHandle,
+                           IS_CAPTURE_STATUS_INFO_CMD_GET,
+                           (void*)&CaptureStatusInfo,
+                           sizeof(CaptureStatusInfo));
+          parseCaptureStatus(CaptureStatusInfo);
+          is_CaptureStatus(camHandle,
+                           IS_CAPTURE_STATUS_INFO_CMD_RESET,
+                           0,
+                           0);
+          goto afterCapture;  // Note: Breaking from a nested block is the single use for goto statements
+        default:
+          cout << "Error capturing image! Error code: " << captureStatus << endl;
+          goto afterCapture;
         }
       }
       while (captureStatus != IS_TIMED_OUT ||
              ++timeoutCounter >= TIMEOUT_COUNTER_MAX);
+    afterCapture:
 
       if (timeoutCounter >= TIMEOUT_COUNTER_MAX)
         cout << "Image timeout!" << endl;
