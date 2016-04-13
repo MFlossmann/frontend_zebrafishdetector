@@ -9,6 +9,8 @@ current goal: video mode with freerun mode
 #include <iostream>
 #include <stdio.h>
 #include <string>
+#include <chrono>
+
 //#include <opencv/cv.hpp>
 #include <opencv2/opencv.hpp>
 #include <ueye.h>
@@ -20,29 +22,32 @@ namespace po = boost::program_options;
 using std::cout;
 using std::endl;
 
+//////////////////// typedefs
+typedef std::chrono::high_resolution_clock Time;
+
 //////////////////// consts
 const std::string CONFIG_FILE_DEFAULT = "../cfg/front_end.cfg";
 
 const int IMAGE_WIDTH = 1280;
 const int IMAGE_HEIGHT = 1024;
 const int COLOR_DEPTH = 8;
-const int COLOR_DEPTH_CV = CV_8UC1;
+const int COLOR_DEPTH_CV = CV_8UC3;
+const int COLOR_DEPTH_CV_GREY = CV_8UC1;
 const double DEFAULT_FRAMERATE = 30.0;
 const double DEFAULT_EXPOSURE_MS = 4;
 const int IMAGE_TIMEOUT = 500;
 const int TIMEOUT_COUNTER_MAX = 10;
 
+const int RINGBUFFER_SIZE_DEFAULT = 10;
 
-const int BUFFER_AMOUNT = 2;
+const cv::Scalar YELLOW = cv::Scalar(0,0xFF,0xFF);
 
 //////////////////// structs
 struct cameraOptions{
-  cameraOptions() :
-    framerate(DEFAULT_FRAMERATE),
-    exposure(DEFAULT_EXPOSURE_MS){}
   double framerate;
   double framerateEff;
   double exposure;
+  unsigned int ringBufferSize;
 };
 
 //////////////////// globals
@@ -51,30 +56,31 @@ cameraOptions camOptions;
 //////////////////// functions
 int parseOptions(int argc, char* argv[]){
   std::string config_file;
-  
+
   po::options_description generic("Generic options");
   generic.add_options()
     ("help,h", "Produce help message")
     ("config,c", po::value<std::string>(&config_file)->default_value(CONFIG_FILE_DEFAULT), "Different configuration file.")
     ;
-  
+
   // Options that are allowed both on command line and in the config file
   po::options_description config("Configuration");
   config.add_options()
-    ("framerate,f", po::value<double>(), "set framerate (fps)")
-    ("exposure,e", po::value<double>(), "set exposure time (ms)")
+    ("framerate,f", po::value<double>(&camOptions.framerate)->default_value(DEFAULT_FRAMERATE), "set framerate (fps)")
+    ("exposure,e", po::value<double>(&camOptions.exposure)->default_value(DEFAULT_EXPOSURE_MS), "set exposure time (ms)")
+    ("buffer_size,b", po::value<unsigned int>(&camOptions.ringBufferSize)->default_value(RINGBUFFER_SIZE_DEFAULT), "size of image ringbuffer")
     ;
-  
+
   po::options_description cmdline_options;
   cmdline_options.add(generic).add(config);
-  
+
   po::options_description config_file_options;
   config_file_options.add(config);
-  
+
   po::variables_map vm;
   store(po::command_line_parser(argc, argv).
-	options(cmdline_options).run(), vm);
-  
+  options(cmdline_options).run(), vm);
+
   notify(vm);
 
   std::ifstream ifs(config_file.c_str());
@@ -92,14 +98,7 @@ int parseOptions(int argc, char* argv[]){
     cout << cmdline_options << "\n";
     return 1;
   }
-  if (vm.count("framerate")){
-    cout << "Custom framerate set." << endl;
-    camOptions.framerate = vm["framerate"].as<double>();
-  }
-  if (vm.count("exposure")){
-    cout << "Custom exposure set." << endl;
-    camOptions.exposure = vm["exposure"].as<double>();
-  }
+
   return 0;
 }
 
@@ -138,7 +137,7 @@ int main(int argc, char* argv[]){
 // return if --help option was called
   if (parseOptions(argc, argv))
     return 1;
- 
+
   //////////////////// Init the camera
   HIDS camHandle = 0; // select the first available camera.
   int cameraStatus = is_InitCamera(&camHandle, NULL);
@@ -158,7 +157,7 @@ int main(int argc, char* argv[]){
   //////////////////// Set camera options
   // Trigger mode
   is_SetExternalTrigger(camHandle,
-                        IS_SET_TRIGGER_SOFTWARE); // Set to SW trigger for freerun mode
+                        IS_SET_TRIGGER_SOFTWARE); // Set to SW trigger for free video capture
 
   // Framerate
   cameraStatus = is_SetFrameRate(camHandle,
@@ -167,8 +166,8 @@ int main(int argc, char* argv[]){
   switch (cameraStatus){
   case IS_SUCCESS:
     cout << "Framerate was set to " << camOptions.framerate		\
-	 << "fps, the effective framerate is " << camOptions.framerateEff \
-	 << "fps." << endl;
+   << "fps, the effective framerate is " << camOptions.framerateEff \
+   << "fps." << endl;
     break;
   default:
     cout << "Error setting framerate. Err no. " << cameraStatus << endl;
@@ -191,20 +190,22 @@ int main(int argc, char* argv[]){
   // Color depth
   is_SetColorMode(camHandle,
                   IS_CM_MONO8);
-  
+
 
   //////////////////// Init the image buffers
   cv::Mat image(IMAGE_HEIGHT,IMAGE_WIDTH, COLOR_DEPTH_CV);
+  cv::Mat greyImage(IMAGE_HEIGHT,IMAGE_WIDTH, COLOR_DEPTH_CV_GREY);
+
   std::vector<char*> imgPtrList;
   std::vector<int> imgIdList;
 
-  imgPtrList.resize(BUFFER_AMOUNT);
-  imgIdList.resize(BUFFER_AMOUNT);
+  imgPtrList.resize(camOptions.ringBufferSize);
+  imgIdList.resize(camOptions.ringBufferSize);
 
 
   is_SetDisplayMode(camHandle, IS_SET_DM_DIB); // TODO: Where to put this?
 
-  for (int i = 0; i < BUFFER_AMOUNT; i++){
+  for (int i = 0; i < camOptions.ringBufferSize; i++){
     // Allocate memory for the bitmap-image
     int status = is_AllocImageMem(camHandle,
                                   IMAGE_WIDTH,
@@ -228,7 +229,7 @@ int main(int argc, char* argv[]){
 
   // Activate the image queue TODO: necessary?
   is_InitImageQueue(camHandle,
-                     0); // 0 is the only nMode supported
+                    0); // 0 is the only nMode supported
 
 
 // enable the event that a new image is available
@@ -237,6 +238,11 @@ int main(int argc, char* argv[]){
 
   // enable video capturing
   is_CaptureVideo(camHandle, IS_WAIT);
+
+//////////////////// Image capture loop ////////////////////
+  std::chrono::duration<float> frameDelta;
+  auto currentTime = Time::now(),
+    previousTime=Time::now();
 
   do {
 
@@ -248,15 +254,17 @@ int main(int argc, char* argv[]){
       int timeoutCounter = 0;
       int captureStatus;
       do{
-        // TODO: This function fails (IS_NO_SUCCESS)
         captureStatus = is_WaitForNextImage(camHandle,
                                             IMAGE_TIMEOUT,
                                             &currentImgPtr,
                                             &currentImgIndex);
 
         switch(captureStatus){
-        case IS_TIMED_OUT:
         case IS_SUCCESS:
+#ifdef _VERBOSE_MODE_
+          cout << "Image captured!" << endl;
+#endif
+        case IS_TIMED_OUT:
           break;
         case IS_CAPTURE_STATUS:   // Specific error
           UEYE_CAPTURE_STATUS_INFO CaptureStatusInfo;
@@ -269,36 +277,73 @@ int main(int argc, char* argv[]){
                            IS_CAPTURE_STATUS_INFO_CMD_RESET,
                            0,
                            0);
-          goto afterCapture;  // Note: Breaking from a nested block is the single use for goto statements
+          break;
         default:
           cout << "Error capturing image! Error code: " << captureStatus << endl;
-          goto afterCapture;
+          break;
         }
       }
-      while (captureStatus != IS_TIMED_OUT ||
+      while (captureStatus == IS_TIMED_OUT ||
              ++timeoutCounter >= TIMEOUT_COUNTER_MAX);
-    afterCapture:
 
       if (timeoutCounter >= TIMEOUT_COUNTER_MAX)
         cout << "Image timeout!" << endl;
     }
 
 //////////////////// Copy the image buffer
+    {
+    int status = 0;
+#ifdef _GREYSCALE_IMAGE_ // deepcopy the greyscale matrix, shallowcopy the grey Image
+      // copy the image memory to the openCV memory
+      status |= is_CopyImageMem(camHandle,
+                                currentImgPtr,
+                                currentImgIndex,
+                                (char*)greyImage.data);
+      image = greyImage; // shallow copy
+#else // converts image to color (previously:only copy the pointer)
+    greyImage.data = (uchar*) currentImgPtr;
 
-#ifdef _COPY_IMAGE_BUFFER_ // deepcopy the whole matrix
-    // copy the image memory to the openCV memory
-    is_CopyImageMem(camHandle,
-                    currentImgPtr,
-                    currentImgIndex,
-                    (char*)image.data);
-#else // only copy the pointer
-    image.data = (uchar*) currentImgPtr;
-#endif
+    image = greyImage.clone(); // deep copy
+    cv::cvtColor(image,
+                 image,
+                 CV_GRAY2RGB);
+#endif // _GREYSCALE_IMAGE_
 
-    cv::namedWindow("Display Image", CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
-    cv::imshow("Display Image", image);
+    status |= is_UnlockSeqBuf(camHandle,
+                              currentImgIndex,
+                              currentImgPtr); // Release the image buffer again.
 
-  }while(cv::waitKey((int) (1000.0 / camOptions.framerateEff)) == -1);
+    if(status != IS_SUCCESS)
+      cout << "Error copying buffer!" << endl;
+#ifdef _VERBOSE_MODE_
+    else
+      cout << "Buffer " << currentImgIndex << " copied and released." << endl;
+#endif // _VERBOSE_MODE_
+  }
+
+//////////////////// FPS display
+    currentTime = Time::now();
+    frameDelta = currentTime - previousTime;
+    previousTime = currentTime;
+    float fps = 1/frameDelta.count();
+
+    std::stringstream fpsDisplay;
+    fpsDisplay << "FPS: " << fps;
+
+    cv::putText(image,
+                fpsDisplay.str().c_str(), // stringstream -> string -> c-style string
+                cv::Point(150,50),
+                CV_FONT_HERSHEY_PLAIN,
+                2.0,
+                YELLOW);
+
+//////////////////// Display the image
+    cv::namedWindow("Display Image",
+                    CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
+    cv::imshow("Display Image",
+               image);
+
+  }while(cv::waitKey(10) == -1);
 
 //////////////////// Cleanup and exit
 
@@ -306,9 +351,9 @@ int main(int argc, char* argv[]){
   is_StopLiveVideo(camHandle,
                    IS_FORCE_VIDEO_STOP);
   is_ClearSequence(camHandle);
-  
+
   // Free image buffers
-  for (int i=0; i < BUFFER_AMOUNT; i++){
+  for (int i=0; i < camOptions.ringBufferSize; i++){
     is_FreeImageMem(camHandle, imgPtrList[i], imgIdList[i]);
   }
   imgPtrList.clear();
@@ -322,5 +367,4 @@ int main(int argc, char* argv[]){
   std::cout << "Camera " << camHandle << " closed!" << std::endl;
 
   return 0;
-} 
-
+}

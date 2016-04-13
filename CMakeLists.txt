@@ -1,10 +1,16 @@
 cmake_minimum_required(VERSION 2.8)
 project(zebrafish_tracker_frontend)
 
+# For debugging with GDB
+set(CMAKE_BUILD_TYPE Debug)
+# For C++11
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+
 set( 64BIT "x86_64")
 
 # For preprocessor flags
-add_definitions( -D_COPY_IMAGE_BUFFER_ )
+#add_definitions( -D_GREYSCALE_IMAGE_ )
+#add_definitions( -D_VERBOSE_MODE_ )
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
