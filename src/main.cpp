@@ -12,8 +12,7 @@ current goal: video mode with freerun mode
 #include <chrono>
 
 //#include <opencv/cv.hpp>
-#include <opencv2/opencv.hpp>
-#include <ueye.h>
+#include "camera_interface.hpp"
 
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
@@ -29,8 +28,6 @@ typedef std::chrono::high_resolution_clock Time;
 //////////////////// consts
 const std::string CONFIG_FILE_DEFAULT = "../cfg/front_end.cfg";
 
-const int IMAGE_WIDTH = 1280;
-const int IMAGE_HEIGHT = 1024;
 const int COLOR_DEPTH = 8;
 const int COLOR_DEPTH_CV = CV_8UC3;
 const int COLOR_DEPTH_CV_GREY = CV_8UC1;
@@ -48,40 +45,10 @@ const cv::Scalar RED = cv::Scalar(0,0,0xFF);
 const int KEY_ESCAPE = 27;
 
 //////////////////// structs
-struct cameraOptions{
-  cameraOptions(){
-    imageWidth = IMAGE_WIDTH;
-    imageHeight = IMAGE_HEIGHT;
-    aoiWidth = imageWidth;
-    aoiHeight = imageHeight;
-    aoiPosX = 0;
-    aoiPosY = 0;
 
-    cameraMatrix = cv::Mat::eye(3,
-                            3,
-                            CV_64F);
-    distCoeffs = cv::Mat::zeros(8,
-                            1,
-                            CV_64F);
-  }
-  int imageWidth;
-  int imageHeight;
-  unsigned int aoiWidth;
-  unsigned int aoiHeight;
-  int aoiPosX;
-  int aoiPosY;
-  double framerate;
-  double framerateEff;
-  double exposure;
-  unsigned int ringBufferSize;
-
-  bool undistortImage;
-  cv::Mat cameraMatrix;
-  cv::Mat distCoeffs;
-};
 
 //////////////////// globals
-cameraOptions cam_options_;
+cam::cameraOptions cam_options_;
 
 //////////////////// functions
 std::string getBinPath() {
@@ -216,61 +183,18 @@ int main(int argc, char* argv[]){
   if (parseOptions(argc, argv))
     return 1;
 
-  readCalibrationParameters(cam_options_.cameraMatrix,
-                            cam_options_.distCoeffs);
+  if(cam_options_.undistortImage)
+    readCalibrationParameters(cam_options_.cameraMatrix,
+                              cam_options_.distCoeffs);
 
-  //////////////////// Init the camera
-  HIDS camHandle = 0; // select the first available camera.
-  int cameraStatus = is_InitCamera(&camHandle, NULL);
-  switch (cameraStatus){
-  case IS_SUCCESS:
-    std::cout << "Camera " << camHandle << " initialized!" << std::endl;
-    break;
-  case IS_CANT_OPEN_DEVICE:
-    cout << "Error initializing, can't access the camera. Is it connected?\n Are you sure, it has power?" << endl;
+  // FIXXME: remove this peon!
+  int cameraStatus;
+
+  if (cam::initialize(cam_options_) != SUCCESS)
     return -1;
-  default:
-    std::cout << "Error initializing camera. Err no. " << cameraStatus << std::endl;
+
+  if (cam::setOptions(cam_options_) != SUCCESS)
     return -1;
-  } // switch cameraStatus
-
-
-  //////////////////// Set camera options
-  // Trigger mode
-  is_SetExternalTrigger(camHandle,
-                        IS_SET_TRIGGER_SOFTWARE); // Set to SW trigger for free video capture
-
-  // Framerate
-  cameraStatus = is_SetFrameRate(camHandle,
-                                 cam_options_.framerate,
-                                 &cam_options_.framerateEff);
-  switch (cameraStatus){
-  case IS_SUCCESS:
-    cout << "Framerate was set to " << cam_options_.framerate		\
-   << "fps, the effective framerate is " << cam_options_.framerateEff \
-   << "fps." << endl;
-    break;
-  default:
-    cout << "Error setting framerate. Err no. " << cameraStatus << endl;
-  }
-
-  // Exposure time set to specific value
-  cameraStatus = is_Exposure(camHandle,
-                             IS_EXPOSURE_CMD_SET_EXPOSURE,
-                             &cam_options_.exposure,
-                             sizeof(cam_options_.exposure));
-  switch (cameraStatus){
-  case IS_SUCCESS:
-    cout << "Exposure time set to " << cam_options_.exposure	\
-         << "ms." << endl;
-    break;
-  default:
-    cout << "Error setting exposure time. Err no. " << cameraStatus << endl;
-  }
-
-  // Color depth
-  is_SetColorMode(camHandle,
-                  IS_CM_MONO8);
 
   // Area of interest (AOI)
   {
@@ -286,7 +210,7 @@ int main(int argc, char* argv[]){
     areaOfInterest.s32X = cam_options_.aoiPosX;
     areaOfInterest.s32Y = cam_options_.aoiPosY;
 
-    cameraStatus = is_AOI(camHandle,
+    cameraStatus = is_AOI(cam_options_.camHandle,
                           IS_AOI_IMAGE_SET_AOI,
                           (void*) &areaOfInterest,
                           sizeof(areaOfInterest));
@@ -320,18 +244,18 @@ int main(int argc, char* argv[]){
   imgIdList.resize(cam_options_.ringBufferSize);
 
 
-  is_SetDisplayMode(camHandle, IS_SET_DM_DIB); // TODO: Where to put this?
+  is_SetDisplayMode(cam_options_.camHandle, IS_SET_DM_DIB); // TODO: Where to put this?
 
   for (int i = 0; i < cam_options_.ringBufferSize; i++){
     // Allocate memory for the bitmap-image
-    int status = is_AllocImageMem(camHandle,
+    int status = is_AllocImageMem(cam_options_.camHandle,
                                   cam_options_.aoiWidth,
                                   cam_options_.aoiHeight,
                                   COLOR_DEPTH,
                                   &imgPtrList[i],
                                   &imgIdList[i]);
 
-    status |= is_AddToSequence(camHandle,
+    status |= is_AddToSequence(cam_options_.camHandle,
                                imgPtrList[i],
                                imgIdList[i]);
 
@@ -345,16 +269,16 @@ int main(int argc, char* argv[]){
   }
 
   // Activate the image queue TODO: necessary?
-  is_InitImageQueue(camHandle,
+  is_InitImageQueue(cam_options_.camHandle,
                     0); // 0 is the only nMode supported
 
 
 // enable the event that a new image is available
-  is_EnableEvent(camHandle,
+  is_EnableEvent(cam_options_.camHandle,
                  IS_SET_EVENT_FRAME);
 
   // enable video capturing
-  is_CaptureVideo(camHandle, IS_WAIT);
+  is_CaptureVideo(cam_options_.camHandle, IS_WAIT);
 
 //////////////////// Image capture loop ////////////////////
   std::chrono::duration<float> frameDelta;
@@ -370,7 +294,7 @@ int main(int argc, char* argv[]){
     int timeoutCounter = 0;
     int captureStatus;
     do{
-      captureStatus = is_WaitForNextImage(camHandle,
+      captureStatus = is_WaitForNextImage(cam_options_.camHandle,
                                           IMAGE_TIMEOUT,
                                           &currentImgPtr,
                                           &currentImgIndex);
@@ -384,12 +308,12 @@ int main(int argc, char* argv[]){
         break;
       case IS_CAPTURE_STATUS:   // Specific error
         UEYE_CAPTURE_STATUS_INFO CaptureStatusInfo;
-        is_CaptureStatus(camHandle,
+        is_CaptureStatus(cam_options_.camHandle,
                          IS_CAPTURE_STATUS_INFO_CMD_GET,
                          (void*)&CaptureStatusInfo,
                          sizeof(CaptureStatusInfo));
         parseCaptureStatus(CaptureStatusInfo);
-        // is_CaptureStatus(camHandle,
+        // is_CaptureStatus(cam_options_.camHandle,
         //                  IS_CAPTURE_STATUS_INFO_CMD_RESET,
         //                  0,
         //                  0); // reset the camera status
@@ -410,7 +334,7 @@ int main(int argc, char* argv[]){
 
 #ifdef _GREYSCALE_IMAGE_ // deepcopy the greyscale matrix, shallowcopy the grey Image
       // copy the image memory to the openCV memory
-      captureStatus = is_CopyImageMem(camHandle,
+      captureStatus = is_CopyImageMem(cam_options_.camHandle,
                                       currentImgPtr,
                                       currentImgIndex,
                                       (char*)greyImage.data);
@@ -424,7 +348,7 @@ int main(int argc, char* argv[]){
                    CV_GRAY2RGB);
 #endif // _GREYSCALE_IMAGE_
 
-      captureStatus |= is_UnlockSeqBuf(camHandle,
+      captureStatus |= is_UnlockSeqBuf(cam_options_.camHandle,
                                        currentImgIndex,
                                        currentImgPtr); // Release the image buffer again.
 
@@ -493,23 +417,23 @@ int main(int argc, char* argv[]){
 //////////////////// Cleanup and exit
 
   //TODO: Return variables
-  is_StopLiveVideo(camHandle,
+  is_StopLiveVideo(cam_options_.camHandle,
                    IS_FORCE_VIDEO_STOP);
-  is_ClearSequence(camHandle);
+  is_ClearSequence(cam_options_.camHandle);
 
   // Free image buffers
   for (int i=0; i < cam_options_.ringBufferSize; i++){
-    is_FreeImageMem(camHandle, imgPtrList[i], imgIdList[i]);
+    is_FreeImageMem(cam_options_.camHandle, imgPtrList[i], imgIdList[i]);
   }
   imgPtrList.clear();
   imgIdList.clear();
 
   // Close events, buffers, queues and camera
-  is_DisableEvent(camHandle,IS_SET_EVENT_FRAME);
-  is_ExitImageQueue(camHandle);
-  is_ClearSequence(camHandle);
-  is_ExitCamera(camHandle);
-  std::cout << "Camera " << camHandle << " closed!" << std::endl;
+  is_DisableEvent(cam_options_.camHandle,IS_SET_EVENT_FRAME);
+  is_ExitImageQueue(cam_options_.camHandle);
+  is_ClearSequence(cam_options_.camHandle);
+  is_ExitCamera(cam_options_.camHandle);
+  std::cout << "Camera " << cam_options_.camHandle << " closed!" << std::endl;
 
   return 0;
 }

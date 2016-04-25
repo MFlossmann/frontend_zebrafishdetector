@@ -53,5 +53,8 @@ link_directories(${Boost_LIBRARY_DIRS})
 #add_library(${UEYECAM_NODELET_NAME} ${UEYECAM_NODELET_SOURCES} ${UEYECAM_NODELET_HEADERS})
 #target_link_libraries(${UEYECAM_NODELET_NAME} ${catkin_LIBRARIES} ${UEYECAM_LIB_NAME})
 
+#Make a library from the classes
+add_library(camera_interface src/camera_interface.cpp)
+
 add_executable(start_frontend src/main.cpp)
-target_link_libraries(start_frontend ${UEYE_LIBRARY} ${OpenCV_LIBS} ${Boost_LIBRARIES})
+target_link_libraries(start_frontend camera_interface ${UEYE_LIBRARY} ${OpenCV_LIBS} ${Boost_LIBRARIES})
