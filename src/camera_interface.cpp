@@ -28,7 +28,7 @@ int setOptions(cameraOptions &cam_options){
 
   // Trigger mode
   cameraStatus = is_SetExternalTrigger(cam_options.camHandle,
-                                        IS_SET_TRIGGER_SOFTWARE);
+                                       IS_SET_TRIGGER_LO_HI); // Triggered by rising signal edge
 
   switch (cameraStatus){
   case IS_SUCCESS:

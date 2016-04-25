@@ -61,6 +61,13 @@ struct cameraOptions{
 
 int initialize(cameraOptions &cam_options);
 
+/*! /brief Sets the trigger mode, the framerate, the exposure time
+           and the color depth of the camera.
+
+    /param cam_options includes the camera options
+
+    /return SUCCESS or FAILURE
+ */
 int setOptions(cameraOptions &cam_options);
 
 int setAOI(cameraOptions &cam_options);
