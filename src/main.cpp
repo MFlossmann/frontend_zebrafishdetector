@@ -16,6 +16,7 @@ current goal: video mode with freerun mode
 #include <ueye.h>
 
 #include <boost/program_options.hpp>
+#include <boost/filesystem.hpp>
 #include <fstream>
 
 namespace po = boost::program_options;
@@ -39,36 +40,71 @@ const int IMAGE_TIMEOUT = 500;
 const int TIMEOUT_COUNTER_MAX = 10;
 
 const int RINGBUFFER_SIZE_DEFAULT = 10;
+const std::string WINDOW_NAME = "Display Image (ESC to close)";
 
 const cv::Scalar YELLOW = cv::Scalar(0,0xFF,0xFF);
+const cv::Scalar RED = cv::Scalar(0,0,0xFF);
+
+const int KEY_ESCAPE = 27;
 
 //////////////////// structs
 struct cameraOptions{
+  cameraOptions(){
+    cameraMatrix = cv::Mat::eye(3,
+                            3,
+                            CV_64F);
+    distCoeffs = cv::Mat::zeros(8,
+                            1,
+                            CV_64F);
+  }
+
   double framerate;
   double framerateEff;
   double exposure;
   unsigned int ringBufferSize;
+
+  cv::Mat cameraMatrix;
+  cv::Mat distCoeffs;
 };
 
 //////////////////// globals
-cameraOptions camOptions;
+cameraOptions cam_options_;
 
 //////////////////// functions
+std::string getBinPath() {
+  char buff[PATH_MAX];
+  ssize_t len = ::readlink("/proc/self/exe",
+                           buff,
+                           sizeof(buff) - 2); // leave one index space for the \0 character
+
+  while (--len > 0 && buff[len] != '/'); // remove the filename
+
+  buff[++len] = '\0';
+  return std::string(buff);
+}
+
 int parseOptions(int argc, char* argv[]){
-  std::string config_file;
+  std::string config_file_path, binary_path;
+
+// get binary path
+  binary_path = getBinPath();
+  if (binary_path.empty()){
+    cout << "Error collecting binary path! Terminating" << endl;
+    return -1;
+  }
 
   po::options_description generic("Generic options");
   generic.add_options()
     ("help,h", "Produce help message")
-    ("config,c", po::value<std::string>(&config_file)->default_value(CONFIG_FILE_DEFAULT), "Different configuration file.")
+    ("config,c", po::value<std::string>(&config_file_path)->default_value(binary_path + CONFIG_FILE_DEFAULT), "Different configuration file.")
     ;
 
   // Options that are allowed both on command line and in the config file
   po::options_description config("Configuration");
   config.add_options()
-    ("framerate,f", po::value<double>(&camOptions.framerate)->default_value(DEFAULT_FRAMERATE), "set framerate (fps)")
-    ("exposure,e", po::value<double>(&camOptions.exposure)->default_value(DEFAULT_EXPOSURE_MS), "set exposure time (ms)")
-    ("buffer_size,b", po::value<unsigned int>(&camOptions.ringBufferSize)->default_value(RINGBUFFER_SIZE_DEFAULT), "size of image ringbuffer")
+    ("framerate,f", po::value<double>(&cam_options_.framerate)->default_value(DEFAULT_FRAMERATE), "set framerate (fps)")
+    ("exposure,e", po::value<double>(&cam_options_.exposure)->default_value(DEFAULT_EXPOSURE_MS), "set exposure time (ms)")
+    ("buffer_size,b", po::value<unsigned int>(&cam_options_.ringBufferSize)->default_value(RINGBUFFER_SIZE_DEFAULT), "size of image ringbuffer")
     ;
 
   po::options_description cmdline_options;
@@ -77,30 +113,39 @@ int parseOptions(int argc, char* argv[]){
   po::options_description config_file_options;
   config_file_options.add(config);
 
-  po::variables_map vm;
+  po::variables_map variable_map;
   store(po::command_line_parser(argc, argv).
-  options(cmdline_options).run(), vm);
+        options(cmdline_options).run(), variable_map);
 
-  notify(vm);
+  notify(variable_map);
 
-  std::ifstream ifs(config_file.c_str());
-  // if (!ifs){
-  //   cout << "can't open config file: " << config_file << endl;
-  //   return 2;
-  // }
-  // else
-  //   {
-  //     store(parse_config_file(ifs, config_file_options), vm);
-  //     notify(vm);
-  //   }
+  std::ifstream ifs(config_file_path.c_str(),
+                    std::ifstream::in);
 
-  if (vm.count("help")) {
+  {
+    boost::filesystem::path tmp(config_file_path);
+
+//FIXXXME: check if the file exists or not!
+    if (!ifs.is_open()){
+    cout << "can't open config file: " << config_file_path << endl;
+    return 2;
+  }
+  else
+    {
+       store(parse_config_file(ifs, config_file_options), variable_map);
+       notify(variable_map);
+    }
+  }
+
+  if (variable_map.count("help")) {
     cout << cmdline_options << "\n";
     return 1;
   }
 
   return 0;
 }
+
+
 
 void parseCaptureStatus(UEYE_CAPTURE_STATUS_INFO CaptureStatusInfo){
   cout << "The following errors occured:" << endl;
@@ -133,10 +178,32 @@ void parseCaptureStatus(UEYE_CAPTURE_STATUS_INFO CaptureStatusInfo){
     cout << "\tFreerun mode: The GigE uEye camera could neither process nor output an image captured by the sensor.\n\tHardware trigger mode: The GigE uEye camera received a hardware trigger signal which could not be processed because the sensor was still busy." << endl;
 }
 
+void readCalibrationParameters(cv::Mat &cameraMatrix,
+                               cv::Mat &distCoeffs){
+  // FIXXXXXME: make this dynamic!!
+  //cv::FileStorage fs("../fg/calibration.yml", cv::FileStorage::READ);
+  cv::FileStorage fs("/home/prunebutt/Documents/uni/masterthesis/cfg/camera_calibration.yml",
+                     cv::FileStorage::READ);
+
+  if (!fs.isOpened()){
+    cout << "Couldn't open a recalibration file. Image will be distorted." << endl;
+
+    return;
+  }
+
+  fs["Camera_Matrix"] >> cameraMatrix;
+  fs["Distortion_Coefficients"] >> distCoeffs;
+
+  return;
+}
+
 int main(int argc, char* argv[]){
 // return if --help option was called
   if (parseOptions(argc, argv))
     return 1;
+
+  readCalibrationParameters(cam_options_.cameraMatrix,
+                            cam_options_.distCoeffs);
 
   //////////////////// Init the camera
   HIDS camHandle = 0; // select the first available camera.
@@ -161,12 +228,12 @@ int main(int argc, char* argv[]){
 
   // Framerate
   cameraStatus = is_SetFrameRate(camHandle,
-                                 camOptions.framerate,
-                                 &camOptions.framerateEff);
+                                 cam_options_.framerate,
+                                 &cam_options_.framerateEff);
   switch (cameraStatus){
   case IS_SUCCESS:
-    cout << "Framerate was set to " << camOptions.framerate		\
-   << "fps, the effective framerate is " << camOptions.framerateEff \
+    cout << "Framerate was set to " << cam_options_.framerate		\
+   << "fps, the effective framerate is " << cam_options_.framerateEff \
    << "fps." << endl;
     break;
   default:
@@ -176,11 +243,11 @@ int main(int argc, char* argv[]){
   // Exposure time set to specific value
   cameraStatus = is_Exposure(camHandle,
                              IS_EXPOSURE_CMD_SET_EXPOSURE,
-                             &camOptions.exposure,
-                             sizeof(camOptions.exposure));
+                             &cam_options_.exposure,
+                             sizeof(cam_options_.exposure));
   switch (cameraStatus){
   case IS_SUCCESS:
-    cout << "Exposure time set to " << camOptions.exposure	\
+    cout << "Exposure time set to " << cam_options_.exposure	\
          << "ms." << endl;
     break;
   default:
@@ -199,13 +266,13 @@ int main(int argc, char* argv[]){
   std::vector<char*> imgPtrList;
   std::vector<int> imgIdList;
 
-  imgPtrList.resize(camOptions.ringBufferSize);
-  imgIdList.resize(camOptions.ringBufferSize);
+  imgPtrList.resize(cam_options_.ringBufferSize);
+  imgIdList.resize(cam_options_.ringBufferSize);
 
 
   is_SetDisplayMode(camHandle, IS_SET_DM_DIB); // TODO: Where to put this?
 
-  for (int i = 0; i < camOptions.ringBufferSize; i++){
+  for (int i = 0; i < cam_options_.ringBufferSize; i++){
     // Allocate memory for the bitmap-image
     int status = is_AllocImageMem(camHandle,
                                   IMAGE_WIDTH,
@@ -250,77 +317,99 @@ int main(int argc, char* argv[]){
     int currentImgIndex = -1;
 
 //////////////////// Capture the image
-    {
-      int timeoutCounter = 0;
-      int captureStatus;
-      do{
-        captureStatus = is_WaitForNextImage(camHandle,
-                                            IMAGE_TIMEOUT,
-                                            &currentImgPtr,
-                                            &currentImgIndex);
+    int timeoutCounter = 0;
+    int captureStatus;
+    do{
+      captureStatus = is_WaitForNextImage(camHandle,
+                                          IMAGE_TIMEOUT,
+                                          &currentImgPtr,
+                                          &currentImgIndex);
 
-        switch(captureStatus){
-        case IS_SUCCESS:
+      switch(captureStatus){
+      case IS_SUCCESS:
 #ifdef _VERBOSE_MODE_
-          cout << "Image captured!" << endl;
+        cout << "Image captured!" << endl;
 #endif
-        case IS_TIMED_OUT:
-          break;
-        case IS_CAPTURE_STATUS:   // Specific error
-          UEYE_CAPTURE_STATUS_INFO CaptureStatusInfo;
-          is_CaptureStatus(camHandle,
-                           IS_CAPTURE_STATUS_INFO_CMD_GET,
-                           (void*)&CaptureStatusInfo,
-                           sizeof(CaptureStatusInfo));
-          parseCaptureStatus(CaptureStatusInfo);
-          is_CaptureStatus(camHandle,
-                           IS_CAPTURE_STATUS_INFO_CMD_RESET,
-                           0,
-                           0);
-          break;
-        default:
-          cout << "Error capturing image! Error code: " << captureStatus << endl;
-          break;
-        }
+      case IS_TIMED_OUT:
+        break;
+      case IS_CAPTURE_STATUS:   // Specific error
+        UEYE_CAPTURE_STATUS_INFO CaptureStatusInfo;
+        is_CaptureStatus(camHandle,
+                         IS_CAPTURE_STATUS_INFO_CMD_GET,
+                         (void*)&CaptureStatusInfo,
+                         sizeof(CaptureStatusInfo));
+        parseCaptureStatus(CaptureStatusInfo);
+        // is_CaptureStatus(camHandle,
+        //                  IS_CAPTURE_STATUS_INFO_CMD_RESET,
+        //                  0,
+        //                  0); // reset the camera status
+        break;
+      default:
+        cout << "Error capturing image! Error code: " << captureStatus << endl;
+        break;
       }
-      while (captureStatus == IS_TIMED_OUT ||
-             ++timeoutCounter >= TIMEOUT_COUNTER_MAX);
-
-      if (timeoutCounter >= TIMEOUT_COUNTER_MAX)
-        cout << "Image timeout!" << endl;
     }
+    while (captureStatus == IS_TIMED_OUT ||
+           ++timeoutCounter >= TIMEOUT_COUNTER_MAX);
+
+    if (timeoutCounter >= TIMEOUT_COUNTER_MAX)
+      cout << "Image timeout!" << endl;
 
 //////////////////// Copy the image buffer
-    {
-    int status = 0;
+    if (captureStatus == IS_SUCCESS){ // Only copy if an image was received
+
 #ifdef _GREYSCALE_IMAGE_ // deepcopy the greyscale matrix, shallowcopy the grey Image
       // copy the image memory to the openCV memory
-      status |= is_CopyImageMem(camHandle,
-                                currentImgPtr,
-                                currentImgIndex,
-                                (char*)greyImage.data);
+      captureStatus = is_CopyImageMem(camHandle,
+                                      currentImgPtr,
+                                      currentImgIndex,
+                                      (char*)greyImage.data);
       image = greyImage; // shallow copy
 #else // converts image to color (previously:only copy the pointer)
-    greyImage.data = (uchar*) currentImgPtr;
+      greyImage.data = (uchar*) currentImgPtr;
 
-    image = greyImage.clone(); // deep copy
-    cv::cvtColor(image,
-                 image,
-                 CV_GRAY2RGB);
+      image = greyImage.clone(); // deep copy
+      cv::cvtColor(image,
+                   image,
+                   CV_GRAY2RGB);
 #endif // _GREYSCALE_IMAGE_
 
-    status |= is_UnlockSeqBuf(camHandle,
-                              currentImgIndex,
-                              currentImgPtr); // Release the image buffer again.
+      captureStatus |= is_UnlockSeqBuf(camHandle,
+                                       currentImgIndex,
+                                       currentImgPtr); // Release the image buffer again.
 
-    if(status != IS_SUCCESS)
-      cout << "Error copying buffer!" << endl;
+      if(captureStatus != IS_SUCCESS)
+        cout << "Error copying buffer!" << endl;
 #ifdef _VERBOSE_MODE_
-    else
-      cout << "Buffer " << currentImgIndex << " copied and released." << endl;
+      else {
+        cout << "Buffer " << currentImgIndex << " copied and released." << endl;
+      }
 #endif // _VERBOSE_MODE_
-  }
 
+//////////////////// Undistort the image
+      cv::Mat tmp = image.clone();
+        cv::undistort(tmp,
+                      image,
+                      cam_options_.cameraMatrix,
+                      cam_options_.distCoeffs);
+
+    } // captureStatus == IS_SUCCESS
+
+//////////////////// No new image received
+    else {
+      cout << "No image received, copying the old one." << endl;
+
+      cv::putText(image,
+                  "Image out of date!",
+                  cv::Point(image.cols*.1,
+                            image.rows*.94),
+                  CV_FONT_HERSHEY_PLAIN,
+                  5.0,
+                  RED,
+                  3);
+    }
+
+// FIXXME
 //////////////////// FPS display
     currentTime = Time::now();
     frameDelta = currentTime - previousTime;
@@ -336,14 +425,15 @@ int main(int argc, char* argv[]){
                 CV_FONT_HERSHEY_PLAIN,
                 2.0,
                 YELLOW);
+// END FIXXME
 
 //////////////////// Display the image
-    cv::namedWindow("Display Image",
+    cv::namedWindow(WINDOW_NAME,
                     CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
-    cv::imshow("Display Image",
+    cv::imshow(WINDOW_NAME,
                image);
 
-  }while(cv::waitKey(10) == -1);
+  }while(cv::waitKey(10) != KEY_ESCAPE);
 
 //////////////////// Cleanup and exit
 
@@ -353,7 +443,7 @@ int main(int argc, char* argv[]){
   is_ClearSequence(camHandle);
 
   // Free image buffers
-  for (int i=0; i < camOptions.ringBufferSize; i++){
+  for (int i=0; i < cam_options_.ringBufferSize; i++){
     is_FreeImageMem(camHandle, imgPtrList[i], imgIdList[i]);
   }
   imgPtrList.clear();
