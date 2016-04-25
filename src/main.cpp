@@ -34,7 +34,7 @@ const int IMAGE_HEIGHT = 1024;
 const int COLOR_DEPTH = 8;
 const int COLOR_DEPTH_CV = CV_8UC3;
 const int COLOR_DEPTH_CV_GREY = CV_8UC1;
-const double DEFAULT_FRAMERATE = 30.0;
+const double DEFAULT_FRAMERATE = 15.0;
 const double DEFAULT_EXPOSURE_MS = 4;
 const int IMAGE_TIMEOUT = 500;
 const int TIMEOUT_COUNTER_MAX = 10;
@@ -50,6 +50,13 @@ const int KEY_ESCAPE = 27;
 //////////////////// structs
 struct cameraOptions{
   cameraOptions(){
+    imageWidth = IMAGE_WIDTH;
+    imageHeight = IMAGE_HEIGHT;
+    aoiWidth = imageWidth;
+    aoiHeight = imageHeight;
+    aoiPosX = 0;
+    aoiPosY = 0;
+
     cameraMatrix = cv::Mat::eye(3,
                             3,
                             CV_64F);
@@ -57,12 +64,18 @@ struct cameraOptions{
                             1,
                             CV_64F);
   }
-
+  int imageWidth;
+  int imageHeight;
+  unsigned int aoiWidth;
+  unsigned int aoiHeight;
+  int aoiPosX;
+  int aoiPosY;
   double framerate;
   double framerateEff;
   double exposure;
   unsigned int ringBufferSize;
 
+  bool undistortImage;
   cv::Mat cameraMatrix;
   cv::Mat distCoeffs;
 };
@@ -105,6 +118,7 @@ int parseOptions(int argc, char* argv[]){
     ("framerate,f", po::value<double>(&cam_options_.framerate)->default_value(DEFAULT_FRAMERATE), "set framerate (fps)")
     ("exposure,e", po::value<double>(&cam_options_.exposure)->default_value(DEFAULT_EXPOSURE_MS), "set exposure time (ms)")
     ("buffer_size,b", po::value<unsigned int>(&cam_options_.ringBufferSize)->default_value(RINGBUFFER_SIZE_DEFAULT), "size of image ringbuffer")
+    ("undistort,u", po::value<bool>(&cam_options_.undistortImage)->default_value(false), "undistort the image?")
     ;
 
   po::options_description cmdline_options;
@@ -258,10 +272,46 @@ int main(int argc, char* argv[]){
   is_SetColorMode(camHandle,
                   IS_CM_MONO8);
 
+  // Area of interest (AOI)
+  {
+    cam_options_.aoiWidth = cam_options_.imageWidth / 2;
+    cam_options_.aoiHeight = cam_options_.imageHeight / 2;
+
+    cam_options_.aoiPosX = (cam_options_.imageWidth / 2) - (cam_options_.aoiWidth / 2);
+    cam_options_.aoiPosY = (cam_options_.imageHeight / 2) - (cam_options_.aoiHeight / 2);
+
+    IS_RECT areaOfInterest;
+    areaOfInterest.s32Width = cam_options_.aoiWidth;
+    areaOfInterest.s32Height = cam_options_.aoiHeight;
+    areaOfInterest.s32X = cam_options_.aoiPosX;
+    areaOfInterest.s32Y = cam_options_.aoiPosY;
+
+    cameraStatus = is_AOI(camHandle,
+                          IS_AOI_IMAGE_SET_AOI,
+                          (void*) &areaOfInterest,
+                          sizeof(areaOfInterest));
+
+    switch (cameraStatus){
+    case IS_SUCCESS:
+      cout << "Area of interest set" << endl;
+      break;
+    case IS_INVALID_PARAMETER:
+      cout << "Error setting area of interest. Invalid parameter!" << endl;
+      break;
+    default:
+      cout << "Error setting area of interest. Err no. " << cameraStatus << endl;
+    }
+  }
+
+
 
   //////////////////// Init the image buffers
-  cv::Mat image(IMAGE_HEIGHT,IMAGE_WIDTH, COLOR_DEPTH_CV);
-  cv::Mat greyImage(IMAGE_HEIGHT,IMAGE_WIDTH, COLOR_DEPTH_CV_GREY);
+  cv::Mat image(cam_options_.aoiHeight,
+                cam_options_.aoiWidth,
+                COLOR_DEPTH_CV);
+  cv::Mat greyImage(cam_options_.aoiHeight,
+                    cam_options_.aoiWidth,
+                    COLOR_DEPTH_CV_GREY);
 
   std::vector<char*> imgPtrList;
   std::vector<int> imgIdList;
@@ -275,8 +325,8 @@ int main(int argc, char* argv[]){
   for (int i = 0; i < cam_options_.ringBufferSize; i++){
     // Allocate memory for the bitmap-image
     int status = is_AllocImageMem(camHandle,
-                                  IMAGE_WIDTH,
-                                  IMAGE_HEIGHT,
+                                  cam_options_.aoiWidth,
+                                  cam_options_.aoiHeight,
                                   COLOR_DEPTH,
                                   &imgPtrList[i],
                                   &imgIdList[i]);
@@ -387,11 +437,16 @@ int main(int argc, char* argv[]){
 #endif // _VERBOSE_MODE_
 
 //////////////////// Undistort the image
-      cv::Mat tmp = image.clone();
+
+      if(cam_options_.undistortImage){
+
+        cv::Mat tmp = image.clone();
+
         cv::undistort(tmp,
                       image,
                       cam_options_.cameraMatrix,
                       cam_options_.distCoeffs);
+      } // undistortImage
 
     } // captureStatus == IS_SUCCESS
 
@@ -409,7 +464,7 @@ int main(int argc, char* argv[]){
                   3);
     }
 
-// FIXXME
+// FIXXME: Still not sure if these are the proper fps
 //////////////////// FPS display
     currentTime = Time::now();
     frameDelta = currentTime - previousTime;
