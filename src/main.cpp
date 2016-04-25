@@ -28,9 +28,6 @@ typedef std::chrono::high_resolution_clock Time;
 //////////////////// consts
 const std::string CONFIG_FILE_DEFAULT = "../cfg/front_end.cfg";
 
-const int COLOR_DEPTH = 8;
-const int COLOR_DEPTH_CV = CV_8UC3;
-const int COLOR_DEPTH_CV_GREY = CV_8UC1;
 const double DEFAULT_FRAMERATE = 15.0;
 const double DEFAULT_EXPOSURE_MS = 4;
 const int IMAGE_TIMEOUT = 500;
@@ -126,39 +123,6 @@ int parseOptions(int argc, char* argv[]){
   return 0;
 }
 
-
-
-void parseCaptureStatus(UEYE_CAPTURE_STATUS_INFO CaptureStatusInfo){
-  cout << "The following errors occured:" << endl;
-
-  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_API_NO_DEST_MEM])
-    cout << "\tNo destination memory for copying." << endl;
-
-  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_API_CONVERSION_FAILED])
-    cout << "\tCurrent image could'nt be processed correctly." << endl;
-
-  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_API_IMAGE_LOCKED])
-    cout << "\tDestination buffers are locked." << endl;
-
-  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_DRV_OUT_OF_BUFFERS])
-    cout << "\tNo free internal image memory available to the driver." << endl;
-
-  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_DRV_DEVICE_NOT_READY])
-    cout << "\tCamera no longer available." << endl;
-
-  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_USB_TRANSFER_FAILED])
-    cout << "\tImage wasn't transferred over the USB bus." << endl; // technically shouldn't be possible with the Gige Ueye
-
-  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_DEV_TIMEOUT])
-    cout << "\tThe device reached a timeout." << endl;
-
-  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_ETH_BUFFER_OVERRUN])
-    cout << "\tThe sensor transfers more data than the internal camera memory can accomodate." << endl;
-
-  if (CaptureStatusInfo.adwCapStatusCnt_Detail[IS_CAP_STATUS_ETH_MISSED_IMAGES])
-    cout << "\tFreerun mode: The GigE uEye camera could neither process nor output an image captured by the sensor.\n\tHardware trigger mode: The GigE uEye camera received a hardware trigger signal which could not be processed because the sensor was still busy." << endl;
-}
-
 void readCalibrationParameters(cv::Mat &cameraMatrix,
                                cv::Mat &distCoeffs){
   // FIXXXXXME: make this dynamic!!
@@ -187,8 +151,6 @@ int main(int argc, char* argv[]){
     readCalibrationParameters(cam_options_.cameraMatrix,
                               cam_options_.distCoeffs);
 
-  // FIXXME: remove this peon!
-  int cameraStatus;
 
   if (cam::initialize(cam_options_) != SUCCESS)
     return -1;
@@ -196,79 +158,20 @@ int main(int argc, char* argv[]){
   if (cam::setOptions(cam_options_) != SUCCESS)
     return -1;
 
-  // Area of interest (AOI)
-  {
-    cam_options_.aoiWidth = cam_options_.imageWidth / 2;
-    cam_options_.aoiHeight = cam_options_.imageHeight / 2;
+  if (cam::setAOI(cam_options_) != SUCCESS)
+    return -1;
 
-    cam_options_.aoiPosX = (cam_options_.imageWidth / 2) - (cam_options_.aoiWidth / 2);
-    cam_options_.aoiPosY = (cam_options_.imageHeight / 2) - (cam_options_.aoiHeight / 2);
-
-    IS_RECT areaOfInterest;
-    areaOfInterest.s32Width = cam_options_.aoiWidth;
-    areaOfInterest.s32Height = cam_options_.aoiHeight;
-    areaOfInterest.s32X = cam_options_.aoiPosX;
-    areaOfInterest.s32Y = cam_options_.aoiPosY;
-
-    cameraStatus = is_AOI(cam_options_.camHandle,
-                          IS_AOI_IMAGE_SET_AOI,
-                          (void*) &areaOfInterest,
-                          sizeof(areaOfInterest));
-
-    switch (cameraStatus){
-    case IS_SUCCESS:
-      cout << "Area of interest set" << endl;
-      break;
-    case IS_INVALID_PARAMETER:
-      cout << "Error setting area of interest. Invalid parameter!" << endl;
-      break;
-    default:
-      cout << "Error setting area of interest. Err no. " << cameraStatus << endl;
-    }
-  }
-
-
-
-  //////////////////// Init the image buffers
-  cv::Mat image(cam_options_.aoiHeight,
-                cam_options_.aoiWidth,
-                COLOR_DEPTH_CV);
-  cv::Mat greyImage(cam_options_.aoiHeight,
-                    cam_options_.aoiWidth,
-                    COLOR_DEPTH_CV_GREY);
-
+  cv::Mat image, greyImage;
   std::vector<char*> imgPtrList;
   std::vector<int> imgIdList;
 
-  imgPtrList.resize(cam_options_.ringBufferSize);
-  imgIdList.resize(cam_options_.ringBufferSize);
+  cam::initBuffers(cam_options_,
+                   image,
+                   greyImage,
+                   imgPtrList,
+                   imgIdList);
 
-
-  is_SetDisplayMode(cam_options_.camHandle, IS_SET_DM_DIB); // TODO: Where to put this?
-
-  for (int i = 0; i < cam_options_.ringBufferSize; i++){
-    // Allocate memory for the bitmap-image
-    int status = is_AllocImageMem(cam_options_.camHandle,
-                                  cam_options_.aoiWidth,
-                                  cam_options_.aoiHeight,
-                                  COLOR_DEPTH,
-                                  &imgPtrList[i],
-                                  &imgIdList[i]);
-
-    status |= is_AddToSequence(cam_options_.camHandle,
-                               imgPtrList[i],
-                               imgIdList[i]);
-
-    if (status != IS_SUCCESS){
-      std::cout << "Failed to initialize image buffer" << i \
-                << ". Error: " << status << std::endl;
-      return -1;
-    }
-
-    std::cout << "Image buffer " << i << " allocated and added to the sequence." << std::endl;
-  }
-
-  // Activate the image queue TODO: necessary?
+  // Activate the image queue
   is_InitImageQueue(cam_options_.camHandle,
                     0); // 0 is the only nMode supported
 
@@ -312,7 +215,7 @@ int main(int argc, char* argv[]){
                          IS_CAPTURE_STATUS_INFO_CMD_GET,
                          (void*)&CaptureStatusInfo,
                          sizeof(CaptureStatusInfo));
-        parseCaptureStatus(CaptureStatusInfo);
+        cam::getCaptureStatus(CaptureStatusInfo);
         // is_CaptureStatus(cam_options_.camHandle,
         //                  IS_CAPTURE_STATUS_INFO_CMD_RESET,
         //                  0,

@@ -19,6 +19,10 @@ namespace cam{
 const int IMAGE_WIDTH = 1280;
 const int IMAGE_HEIGHT = 1024;
 
+const int COLOR_DEPTH = 8;
+const int COLOR_DEPTH_CV = CV_8UC3;
+const int COLOR_DEPTH_CV_GREY = CV_8UC1;
+
 //////////////////// structs
 struct cameraOptions{
         cameraOptions(){
@@ -59,4 +63,13 @@ int initialize(cameraOptions &cam_options);
 
 int setOptions(cameraOptions &cam_options);
 
+int setAOI(cameraOptions &cam_options);
+
+int initBuffers(const cameraOptions &cam_options,
+                cv::Mat &image,
+                cv::Mat &greyImage,
+                std::vector<char*> &imgPtrList,
+                std::vector<int> &imgIdList);
+
+void getCaptureStatus(UEYE_CAPTURE_STATUS_INFO capture_status_info);
 }
