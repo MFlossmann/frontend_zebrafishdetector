@@ -46,7 +46,6 @@ include_directories(
 link_directories(${Boost_LIBRARY_DIRS})
 
 
-
 #add_library(${UEYECAM_LIB_NAME} ${UEYECAM_LIB_SOURCES} ${UEYECAM_LIB_HEADERS})
 #target_link_libraries(${UEYECAM_LIB_NAME} ${UEYE_LIBRARY})
 
@@ -55,6 +54,7 @@ link_directories(${Boost_LIBRARY_DIRS})
 
 #Make a library from the classes
 add_library(camera_interface src/camera_interface.cpp)
+add_library(image_processing src/image_processing.cpp)
 
 add_executable(start_frontend src/main.cpp)
-target_link_libraries(start_frontend camera_interface ${UEYE_LIBRARY} ${OpenCV_LIBS} ${Boost_LIBRARIES})
+target_link_libraries(start_frontend camera_interface image_processing ${UEYE_LIBRARY} ${OpenCV_LIBS} ${Boost_LIBRARIES})

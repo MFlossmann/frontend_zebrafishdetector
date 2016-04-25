@@ -13,6 +13,7 @@ current goal: video mode with freerun mode
 
 //#include <opencv/cv.hpp>
 #include "camera_interface.hpp"
+#include "image_processing.hpp"
 
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
@@ -27,6 +28,8 @@ typedef std::chrono::high_resolution_clock Time;
 
 //////////////////// consts
 const std::string CONFIG_FILE_DEFAULT = "../cfg/front_end.cfg";
+// FIXXXME: Put into the proper folder!
+const std::string TEMPLATE_FILE_DEFAULT = "../../pictures/dish.png";
 
 const double DEFAULT_FRAMERATE = 15.0;
 const double DEFAULT_EXPOSURE_MS = 4;
@@ -46,6 +49,7 @@ const int KEY_ESCAPE = 27;
 
 //////////////////// globals
 cam::cameraOptions cam_options_;
+std::string template_path_;
 
 //////////////////// functions
 std::string getBinPath() {
@@ -83,6 +87,7 @@ int parseOptions(int argc, char* argv[]){
     ("exposure,e", po::value<double>(&cam_options_.exposure)->default_value(DEFAULT_EXPOSURE_MS), "set exposure time (ms)")
     ("buffer_size,b", po::value<unsigned int>(&cam_options_.ringBufferSize)->default_value(RINGBUFFER_SIZE_DEFAULT), "size of image ringbuffer")
     ("undistort,u", po::value<bool>(&cam_options_.undistortImage)->default_value(false), "undistort the image?")
+    ("template,t", po::value<std::string>(&template_path_)->default_value(binary_path + TEMPLATE_FILE_DEFAULT), "Template file.")
     ;
 
   po::options_description cmdline_options;
@@ -275,6 +280,22 @@ int main(int argc, char* argv[]){
                       cam_options_.distCoeffs);
       } // undistortImage
 
+//////////////////// Template matching
+      cv::Mat templ = imread(template_path_);
+
+      cv::Point match_point = matchTemplate(image,
+                                            templ,
+                                            CV_TM_CCORR_NORMED);
+
+      cv::rectangle(image,
+                    match_point,
+                    cv::Point(match_point.x + templ.cols,
+                              match_point.y + templ.rows),
+                    RED,
+                    2,
+                    8,
+                    0);
+
     } // captureStatus == IS_SUCCESS
 
 //////////////////// No new image received
@@ -289,7 +310,7 @@ int main(int argc, char* argv[]){
                   5.0,
                   RED,
                   3);
-    }
+    } // captureStatus != IS_SUCCESS
 
 // FIXXME: Still not sure if these are the proper fps
 //////////////////// FPS display
