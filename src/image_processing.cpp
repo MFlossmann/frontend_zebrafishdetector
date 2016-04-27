@@ -2,7 +2,8 @@
 
 Point matchTemplate(const Mat &image,
                     const Mat &templ,
-                    int match_method){
+                    int match_method,
+                    bool show_result){
         Mat image_display, result;
         image.copyTo(image_display);
 
@@ -26,6 +27,13 @@ Point matchTemplate(const Mat &image,
                   NORM_MINMAX,
                   -1,
                   Mat());
+
+        if (show_result){
+          namedWindow("Matching result",
+                      CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+          imshow("Matching result",
+                 result);
+        }
 
 
         double max_val, min_val;

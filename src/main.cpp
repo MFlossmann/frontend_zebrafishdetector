@@ -29,7 +29,7 @@ typedef std::chrono::high_resolution_clock Time;
 //////////////////// consts
 const std::string CONFIG_FILE_DEFAULT = "../cfg/front_end.cfg";
 // FIXXXME: Put into the proper folder!
-const std::string TEMPLATE_FILE_DEFAULT = "../../pictures/dish.png";
+const std::string TEMPLATE_FILE_DEFAULT = "../../pictures/g4243.png";
 
 const double DEFAULT_FRAMERATE = 15.0;
 const double DEFAULT_EXPOSURE_MS = 4;
@@ -285,7 +285,8 @@ int main(int argc, char* argv[]){
 
       cv::Point match_point = matchTemplate(image,
                                             templ,
-                                            CV_TM_CCORR_NORMED);
+                                            CV_TM_CCOEFF,
+                                            true);
 
       cv::rectangle(image,
                     match_point,
@@ -295,6 +296,21 @@ int main(int argc, char* argv[]){
                     2,
                     8,
                     0);
+
+      int cell_size = templ.rows / 2;
+
+      cv::Rect dish(match_point.x - cell_size,
+                    match_point.y - cell_size,
+                    templ.cols * 3 / 2,
+                    templ.rows * 2);
+
+      cv::rectangle(image,
+                    dish,
+                    YELLOW,
+                    2,
+                    8,
+                    0);
+
 
     } // captureStatus == IS_SUCCESS
 
