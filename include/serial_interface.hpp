@@ -2,37 +2,48 @@
 #include <boost/asio/serial_port.hpp>
 #include <boost/asio.hpp>
 
+#include <boost/system/error_code.hpp>
+#include <boost/system/system_error.hpp>
+
 #include <string>
+#include <iostream>
 
 #define SERIAL_SUCCESS 0
 #define SERIAL_FAILURE -1
 
 using namespace boost;
 
-namespace serial_interface{
-        struct serialPort{
-                serialPort(char character_size = 8,
-                           char end_of_line_char = '\n');
-                virtual ~serialPort();
+class SerialPort{
 
-                asio::io_service io_;
-                shared_ptr<asio::serial_port> port_;
+protected:
+        asio::io_service io_service_;
+        shared_ptr<asio::serial_port> port_;
 
-                unsigned int baud_rate_;
-                unsigned char character_size_;
-                char end_of_line_char_;
-        };
+public:
+        unsigned int baud_rate_;
+        unsigned char character_size_;
+        char end_of_line_char_;
 
-        int connect(serialPort port);
+private:
+        SerialPort(const SerialPort &p);
+        SerialPort &operator=(const SerialPort &p);
 
-        int disconnect(serialPort port);
+public:
+        SerialPort(void);
+        virtual ~SerialPort(void);
 
-        int write(serialPort port,
-                  const std::string &buffer);
+        int connect(std::string port_name,
+                    unsigned int baud_rate);
 
-        int write(serialPort port,
-                  const char *buffer,
+        int connect(std::string port_name);
+
+        int disconnect(void);
+
+        int write(const std::string &message);
+
+        int write(const char *message,
                   const int &size);
 
-        int read(serialPort port);
-}
+        int read(void);
+
+};

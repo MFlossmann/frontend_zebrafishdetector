@@ -10,10 +10,13 @@ current goal: video mode with freerun mode
 #include <stdio.h>
 #include <string>
 #include <chrono>
+#include <unistd.h>
 
 //#include <opencv/cv.hpp>
 #include "camera_interface.hpp"
 #include "image_processing.hpp"
+
+#include "xyPlotter.hpp"
 
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
@@ -21,6 +24,7 @@ current goal: video mode with freerun mode
 
 namespace po = boost::program_options;
 using std::cout;
+using std::cerr;
 using std::endl;
 
 //////////////////// typedefs
@@ -31,8 +35,9 @@ const std::string CONFIG_FILE_DEFAULT = "../cfg/front_end.cfg";
 // FIXXXME: Put into the proper folder!
 const std::string TEMPLATE_FILE_DEFAULT = "../../pictures/g4243.png";
 
-const double DEFAULT_FRAMERATE = 15.0;
-const double DEFAULT_EXPOSURE_MS = 4;
+const double DEFAULT_FRAMERATE = 5.0;
+const double DEFAULT_EXPOSURE_MS = 4.0;
+const double DEFAULT_FLASH_TIME = 1.0;
 const int IMAGE_TIMEOUT = 500;
 const int TIMEOUT_COUNTER_MAX = 10;
 
@@ -43,6 +48,8 @@ const cv::Scalar YELLOW = cv::Scalar(0,0xFF,0xFF);
 const cv::Scalar RED = cv::Scalar(0,0,0xFF);
 
 const int KEY_ESCAPE = 27;
+
+const xyBaudRate BAUD_RATE = xyBaudRate::BAUD_57600;
 
 //////////////////// structs
 
@@ -148,6 +155,8 @@ void readCalibrationParameters(cv::Mat &cameraMatrix,
 }
 
 int main(int argc, char* argv[]){
+  xyPlotter xy_plotter;
+
 // return if --help option was called
   if (parseOptions(argc, argv))
     return 1;
@@ -156,38 +165,34 @@ int main(int argc, char* argv[]){
     readCalibrationParameters(cam_options_.cameraMatrix,
                               cam_options_.distCoeffs);
 
+// Initiate serial communication.
+  if (xy_plotter.connect("/dev/ttyUSB0",
+                         BAUD_RATE) != XY_SUCCESS){
+    cerr << "Warning! Error initiating serial communication! Continuing..." << endl;
+  }
+  else
+    cerr << "Serial communication initiated." << endl;
 
-  if (cam::initialize(cam_options_) != SUCCESS)
+  cout << "Going home..." << endl;
+  xy_plotter.goHome();
+
+// Set arduino controlled parameters of the image capturing
+  xy_plotter.setFrameRate(cam_options_.framerate);
+  xy_plotter.setFlashTime(cam_options_.flashTime);
+
+// Initialize the camera
+  if (cam::initialize(cam_options_) != CAM_SUCCESS)
     return -1;
 
-  if (cam::setOptions(cam_options_) != SUCCESS)
+  if (cam::setOptions(cam_options_) != CAM_SUCCESS)
     return -1;
 
-  if (cam::setAOI(cam_options_) != SUCCESS)
+  if (cam::setAOI(cam_options_) != CAM_SUCCESS)
     return -1;
 
-  cv::Mat image, greyImage;
-  std::vector<char*> imgPtrList;
-  std::vector<int> imgIdList;
+  cam::initBuffers(cam_options_);
 
-  cam::initBuffers(cam_options_,
-                   image,
-                   greyImage,
-                   imgPtrList,
-                   imgIdList);
-
-  // Activate the image queue
-  is_InitImageQueue(cam_options_.camHandle,
-                    0); // 0 is the only nMode supported
-
-
-// enable the event that a new image is available
-  is_EnableEvent(cam_options_.camHandle,
-                 IS_SET_EVENT_FRAME);
-
-  // enable video capturing
-  is_CaptureVideo(cam_options_.camHandle, IS_WAIT);
-
+  cam::startVideoCapture(cam_options_);
 //////////////////// Image capture loop ////////////////////
   std::chrono::duration<float> frameDelta;
   auto currentTime = Time::now(),
@@ -221,10 +226,6 @@ int main(int argc, char* argv[]){
                          (void*)&CaptureStatusInfo,
                          sizeof(CaptureStatusInfo));
         cam::getCaptureStatus(CaptureStatusInfo);
-        // is_CaptureStatus(cam_options_.camHandle,
-        //                  IS_CAPTURE_STATUS_INFO_CMD_RESET,
-        //                  0,
-        //                  0); // reset the camera status
         break;
       default:
         cout << "Error capturing image! Error code: " << captureStatus << endl;
@@ -245,14 +246,14 @@ int main(int argc, char* argv[]){
       captureStatus = is_CopyImageMem(cam_options_.camHandle,
                                       currentImgPtr,
                                       currentImgIndex,
-                                      (char*)greyImage.data);
-      image = greyImage; // shallow copy
+                                      (char*)cam_options_.greyImage.data);
+      cam_options_.image = cam_options_.greyImage; // shallow copy
 #else // converts image to color (previously:only copy the pointer)
-      greyImage.data = (uchar*) currentImgPtr;
+      cam_options_.greyImage.data = (uchar*) currentImgPtr;
 
-      image = greyImage.clone(); // deep copy
-      cv::cvtColor(image,
-                   image,
+      cam_options_.image = cam_options_.greyImage.clone(); // deep copy
+      cv::cvtColor(cam_options_.image,
+                   cam_options_.image,
                    CV_GRAY2RGB);
 #endif // _GREYSCALE_IMAGE_
 
@@ -272,10 +273,10 @@ int main(int argc, char* argv[]){
 
       if(cam_options_.undistortImage){
 
-        cv::Mat tmp = image.clone();
+        cv::Mat tmp = cam_options_.image.clone();
 
         cv::undistort(tmp,
-                      image,
+                      cam_options_.image,
                       cam_options_.cameraMatrix,
                       cam_options_.distCoeffs);
       } // undistortImage
@@ -283,12 +284,12 @@ int main(int argc, char* argv[]){
 //////////////////// Template matching
       cv::Mat templ = imread(template_path_);
 
-      cv::Point match_point = matchTemplate(image,
+      cv::Point match_point = matchTemplate(cam_options_.image,
                                             templ,
                                             CV_TM_CCOEFF,
                                             true);
 
-      cv::rectangle(image,
+      cv::rectangle(cam_options_.image,
                     match_point,
                     cv::Point(match_point.x + templ.cols,
                               match_point.y + templ.rows),
@@ -304,7 +305,7 @@ int main(int argc, char* argv[]){
                     templ.cols * 3 / 2,
                     templ.rows * 2);
 
-      cv::rectangle(image,
+      cv::rectangle(cam_options_.image,
                     dish,
                     YELLOW,
                     2,
@@ -318,10 +319,10 @@ int main(int argc, char* argv[]){
     else {
       cout << "No image received, copying the old one." << endl;
 
-      cv::putText(image,
+      cv::putText(cam_options_.image,
                   "Image out of date!",
-                  cv::Point(image.cols*.1,
-                            image.rows*.94),
+                  cv::Point(cam_options_.image.cols*.1,
+                            cam_options_.image.rows*.94),
                   CV_FONT_HERSHEY_PLAIN,
                   5.0,
                   RED,
@@ -338,7 +339,7 @@ int main(int argc, char* argv[]){
     std::stringstream fpsDisplay;
     fpsDisplay << "FPS: " << fps;
 
-    cv::putText(image,
+    cv::putText(cam_options_.image,
                 fpsDisplay.str().c_str(), // stringstream -> string -> c-style string
                 cv::Point(150,50),
                 CV_FONT_HERSHEY_PLAIN,
@@ -350,7 +351,7 @@ int main(int argc, char* argv[]){
     cv::namedWindow(WINDOW_NAME,
                     CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
     cv::imshow(WINDOW_NAME,
-               image);
+               cam_options_.image);
 
   }while(cv::waitKey(10) != KEY_ESCAPE);
 
@@ -363,10 +364,12 @@ int main(int argc, char* argv[]){
 
   // Free image buffers
   for (int i=0; i < cam_options_.ringBufferSize; i++){
-    is_FreeImageMem(cam_options_.camHandle, imgPtrList[i], imgIdList[i]);
+    is_FreeImageMem(cam_options_.camHandle,
+                    cam_options_.imgPtrList[i],
+                    cam_options_.imgIdList[i]);
   }
-  imgPtrList.clear();
-  imgIdList.clear();
+  cam_options_.imgPtrList.clear();
+  cam_options_.imgIdList.clear();
 
   // Close events, buffers, queues and camera
   is_DisableEvent(cam_options_.camHandle,IS_SET_EVENT_FRAME);

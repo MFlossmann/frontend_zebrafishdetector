@@ -2,22 +2,22 @@
 
 namespace cam{
 
-int initialize(cameraOptions &cam_options){
+  int initialize(cameraOptions &cam_options){
   cam_options.camHandle = 0; // select the first available camera.
   int cameraStatus = is_InitCamera(&cam_options.camHandle, NULL);
 
   switch (cameraStatus){
   case IS_SUCCESS:
     std::cout << "Camera " << cam_options.camHandle << " initialized!" << std::endl;
-    return SUCCESS;
+    return CAM_SUCCESS;
 
   case IS_CANT_OPEN_DEVICE:
     cout << "Error initializing, can't access the camera. Is it connected?\n Are you sure, it has power?" << endl;
-    return FAILURE;
+    return CAM_FAILURE;
 
   default:
     std::cout << "Error initializing camera. Err no. " << cameraStatus << std::endl;
-    return FAILURE;
+    return CAM_FAILURE;
   } // switch cameraStatus
 
 } // initialize
@@ -35,7 +35,7 @@ int setOptions(cameraOptions &cam_options){
     break;
   default:
     cout << "Error setting the trigger! Err no. " << cameraStatus << endl;
-    return FAILURE;
+    return CAM_FAILURE;
   } // switch cameraStatus
 
 
@@ -52,7 +52,7 @@ int setOptions(cameraOptions &cam_options){
     break;
   default:
     cout << "Error setting framerate. Err no. " << cameraStatus << endl;
-    return FAILURE;
+    return CAM_FAILURE;
   } // switch cameraStatus
 
 
@@ -68,7 +68,7 @@ int setOptions(cameraOptions &cam_options){
     break;
   default:
     cout << "Error setting exposure time. Err no. " << cameraStatus << endl;
-    return FAILURE;
+    return CAM_FAILURE;
   } // switch cameraStatus
 
   // Color depth
@@ -80,10 +80,10 @@ int setOptions(cameraOptions &cam_options){
     break;
   default:
     cout << "Error setting the color mode! Err no. " << cameraStatus << endl;
-    return FAILURE;
+    return CAM_FAILURE;
   } // switch cameraStatus
 
-  return SUCCESS;
+  return CAM_SUCCESS;
 } // setOptions
 
 int setAOI(cameraOptions &cam_options){
@@ -109,33 +109,29 @@ int setAOI(cameraOptions &cam_options){
   switch (cameraStatus){
   case IS_SUCCESS:
           cout << "Area of interest set." << endl;
-          return SUCCESS;
+          return CAM_SUCCESS;
   case IS_INVALID_PARAMETER:
           cout << "Error setting area of interest. Invalid parameter!" << endl;
-          return FAILURE;
+          return CAM_FAILURE;
   default:
           cout << "Error setting area of interest. Err no. " << cameraStatus << endl;
-          return FAILURE;
+          return CAM_FAILURE;
   } // switch cameraStatus
-} // setAOI
+} // setAOIas
 
-int initBuffers(const cameraOptions &cam_options,
-                cv::Mat &image,
-                cv::Mat &greyImage,
-                std::vector<char*> &imgPtrList,
-                std::vector<int> &imgIdList){
+int initBuffers(cameraOptions &cam_options){
   int cameraStatus;
 
-  image = cv::Mat(cam_options.aoiHeight,
-                  cam_options.aoiWidth,
-                  COLOR_DEPTH_CV);
-  greyImage = cv::Mat(cam_options.aoiHeight,
-                      cam_options.aoiWidth,
-                      COLOR_DEPTH_CV_GREY);
+  cam_options.image = cv::Mat(cam_options.aoiHeight,
+                              cam_options.aoiWidth,
+                              COLOR_DEPTH_CV);
+  cam_options.greyImage = cv::Mat(cam_options.aoiHeight,
+                                  cam_options.aoiWidth,
+                                  COLOR_DEPTH_CV_GREY);
 
 
-  imgPtrList.resize(cam_options.ringBufferSize);
-  imgIdList.resize(cam_options.ringBufferSize);
+  cam_options.imgPtrList.resize(cam_options.ringBufferSize);
+  cam_options.imgIdList.resize(cam_options.ringBufferSize);
 
 
   cameraStatus = is_SetDisplayMode(cam_options.camHandle, IS_SET_DM_DIB);
@@ -145,7 +141,7 @@ int initBuffers(const cameraOptions &cam_options,
   default:
           cout << "Error setting the display mode to bitmap. Error code: " \
                << cameraStatus << endl;
-          return FAILURE;
+          return CAM_FAILURE;
   }
 
 
@@ -155,24 +151,40 @@ int initBuffers(const cameraOptions &cam_options,
                                     cam_options.aoiWidth,
                                     cam_options.aoiHeight,
                                     COLOR_DEPTH,
-                                    &imgPtrList[i],
-                                    &imgIdList[i]);
+                                    &cam_options.imgPtrList[i],
+                                    &cam_options.imgIdList[i]);
 
     cameraStatus |= is_AddToSequence(cam_options.camHandle,
-                                     imgPtrList[i],
-                                     imgIdList[i]);
+                                     cam_options.imgPtrList[i],
+                                     cam_options.imgIdList[i]);
 
     if (cameraStatus != IS_SUCCESS){
       std::cout << "Failed to initialize image buffer" << i \
                 << ". Error: " << cameraStatus << std::endl;
-      return FAILURE;
+      return CAM_FAILURE;
     }
 
     std::cout << "Image buffer " << i << " allocated and added to the sequence." << std::endl;
   } // for-loop running through each buffer
 
-  return SUCCESS;
+  return CAM_SUCCESS;
 } // initBuffers
+
+  int startVideoCapture(cameraOptions &cam_options){
+
+// Activate the image queue
+    is_InitImageQueue(cam_options.camHandle,
+                      0); // 0 is the only nMode supported
+
+// enable the event that a new image is available
+    is_EnableEvent(cam_options.camHandle,
+                   IS_SET_EVENT_FRAME);
+
+// enable video capturing
+    is_CaptureVideo(cam_options.camHandle,
+                    IS_WAIT);
+
+  } // startVideoCapture
 
 
 void getCaptureStatus (UEYE_CAPTURE_STATUS_INFO capture_status_info){
