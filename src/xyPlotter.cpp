@@ -4,7 +4,7 @@ xyPlotter::xyPlotter() : char_size_(xyCharSize::CHAR_SIZE_8),
                          parity_(xyParity::PARITY_NONE),
                          flow_control_(xyFlowControl::FLOW_CONTROL_NONE),
                          num_of_stop_bits_(1),
-                         new_line_("\n"),
+                         new_line_('\n'),
                          relative_movement_(false)
 {}
 
@@ -30,15 +30,47 @@ int xyPlotter::connect(std::string device,
 }
 
 void xyPlotter::send(std::string message){
-  message.append(new_line_);
+  message += new_line_;
 
   serial_port_.write(message.c_str(),
                      message.size());
 }
 
-void xyPlotter::receive(char* buffer,
-  unsigned int buffer_length){
+int xyPlotter::receive(char* buffer,
+                        unsigned int buffer_size){
+  // FIXXME: This will run forever, if nothing is received
+  unsigned int index = 0;
 
+// Make room for the '\0' character
+  buffer_size--;
+
+  while(index < buffer_size){
+    serial_port_.get(buffer[index]);
+
+    if (buffer[index++] == new_line_){
+      buffer[index] = '\0';
+      return XY_SUCCESS;
+    }
+
+    usleep(100);
+  }
+  std::cerr << "Received string exceeded buffer limits!" << std::endl;
+
+  return XY_ERROR;
+}
+
+int xyPlotter::waitOnOk(){
+  char buffer[XY_BUFFER_SIZE];
+  std::string ok_message = "OK!";
+
+// Here, the distance should be received.
+  receive(buffer,
+          XY_BUFFER_SIZE);
+
+  if (ok_message.compare(buffer))
+    return XY_SUCCESS;
+  else
+    return XY_ERROR;
 }
 
 void xyPlotter::moveAbs(double x,
@@ -48,26 +80,23 @@ void xyPlotter::moveAbs(double x,
 
   send(stringStream.str());
 
+  std::cout << "Moving, waiting on Ok...";
+
+// FIXXME: Here, a timeout option can be implemented, when the distance is received.
+  waitOnOk();
+
+  std::cout << "received!" << std::endl;
+
   x_ = x;
   y_ = y;
 }
 
 void xyPlotter::moveAbsX(double x){
-  std::ostringstream stringStream;
-  stringStream << "G1 X" << x;
-
-  send(stringStream.str());
-
-  x_ = x;
+  moveAbs(x,y_);
 }
 
 void xyPlotter::moveAbsY(double y){
-  std::ostringstream stringStream;
-  stringStream << "G1 Y" << y;
-
-  send(stringStream.str());
-
-  y_ = y;
+  moveAbs(x_,y);
 }
 
 void xyPlotter::moveRel(double x,
@@ -105,14 +134,13 @@ void xyPlotter::setFlashTime(double milliseconds){
   send(stringStream.str());
 }
 
-void xyPlotter::setNewLine(std::string new_line){
-  if (new_line.compare("\n") == 0 ||
-      new_line.compare("\r") == 0 ||
-      new_line.compare("\r\n") == 0){
+void xyPlotter::setNewLine(char new_line){
+  if (new_line == '\n' ||
+      new_line == '\r'){
     new_line_ = new_line;
   }
   else{
-    std::cerr << "Newline characters must be \\n, \\r, or \\r\\n!" << std::endl;
+    std::cerr << "Newline characters must be \\n or \\r!" << std::endl;
   }
 }
 

@@ -4,10 +4,14 @@
 #include <string>
 #include <iostream>
 #include <sstream>
+#include <unistd.h>
+
 #include <SerialStream.h>
 
 #define XY_SUCCESS  0
 #define XY_ERROR  -1
+
+#define XY_BUFFER_SIZE  512
 
 using namespace LibSerial;
 
@@ -27,7 +31,7 @@ private:
 
   char num_of_stop_bits_;
 
-  std::string new_line_;
+  char new_line_;
 
   double x_,y_; // Position
   bool relative_movement_;
@@ -45,8 +49,10 @@ public:
 
   void send(std::string message);
 
-  void receive(char* buffer,
-               unsigned int buffer_length);
+  int receive(char* buffer,
+              unsigned int buffer_size);
+
+  int waitOnOk();
 
   void moveAbs(double x,
                double y);
@@ -70,7 +76,7 @@ public:
 
   void setFlashTime(double milliseconds);
 
-  void setNewLine(std::string new_line);
+  void setNewLine(char new_line);
 
   std::string getNewLine();
 };

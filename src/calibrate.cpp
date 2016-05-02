@@ -1,5 +1,6 @@
 #include <string>
 #include <iostream>
+#include <unistd.h>
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -483,6 +484,11 @@ int main(int argc, char** argv){
   }
   else
     cout << "Serial communication initiated..." << endl;
+
+  usleep(1000000);
+  xy_plotter.moveAbs(10,10);
+  usleep(1000000);
+  xy_plotter.moveAbs(0,0);
 
 //////////////////// Connect to the camera
   cam::cameraOptions cam_options;
