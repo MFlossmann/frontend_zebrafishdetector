@@ -485,10 +485,8 @@ int main(int argc, char** argv){
   else
     cout << "Serial communication initiated..." << endl;
 
-  usleep(1000000);
-  xy_plotter.moveAbs(10,10);
-  usleep(1000000);
-  xy_plotter.moveAbs(0,0);
+  xy_plotter.goHome();
+  xy_plotter.moveAbs(200,200);
 
 //////////////////// Connect to the camera
   cam::cameraOptions cam_options;
@@ -542,7 +540,7 @@ int main(int argc, char** argv){
     } // switch captureStatus (FreezeVideo)
 
 
-// copy the image to a opencv-handleable format.
+// copy the image to a opencv-manageable format.
     is_CopyImageMem(cam_options.camHandle,
                     currentImgPtr,
                     currentImgId,

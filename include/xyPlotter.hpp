@@ -8,6 +8,10 @@
 
 #include <SerialStream.h>
 
+#define XY_NEWLINE                "\n"
+#define XY_CARRIAGE_RETURN        "\r"
+#define XY_NEWLINE_CARRIAGERETURN "\r\n"
+
 #define XY_SUCCESS  0
 #define XY_ERROR  -1
 
@@ -31,7 +35,7 @@ private:
 
   char num_of_stop_bits_;
 
-  char new_line_;
+  std::string line_end_;
 
   double x_,y_; // Position
   bool relative_movement_;
@@ -49,8 +53,7 @@ public:
 
   void send(std::string message);
 
-  int receive(char* buffer,
-              unsigned int buffer_size);
+  std::string receive();
 
   int waitOnOk();
 
@@ -76,7 +79,7 @@ public:
 
   void setFlashTime(double milliseconds);
 
-  void setNewLine(char new_line);
+  void setLineEnd(std::string line_end);
 
   std::string getNewLine();
 };

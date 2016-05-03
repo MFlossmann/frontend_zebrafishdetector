@@ -4,7 +4,7 @@ xyPlotter::xyPlotter() : char_size_(xyCharSize::CHAR_SIZE_8),
                          parity_(xyParity::PARITY_NONE),
                          flow_control_(xyFlowControl::FLOW_CONTROL_NONE),
                          num_of_stop_bits_(1),
-                         new_line_('\n'),
+                         line_end_(XY_NEWLINE_CARRIAGERETURN),
                          relative_movement_(false)
 {}
 
@@ -30,47 +30,48 @@ int xyPlotter::connect(std::string device,
 }
 
 void xyPlotter::send(std::string message){
-  message += new_line_;
+  message += line_end_;
 
   serial_port_.write(message.c_str(),
                      message.size());
 }
 
-int xyPlotter::receive(char* buffer,
-                        unsigned int buffer_size){
+std::string xyPlotter::receive(){
   // FIXXME: This will run forever, if nothing is received
   unsigned int index = 0;
+  std::string message = "";
+  char character;
 
-// Make room for the '\0' character
-  buffer_size--;
+// FIXXME: Include a timeout (if possible)
+  while(true){
+    serial_port_.get(character);
+    message += character;
 
-  while(index < buffer_size){
-    serial_port_.get(buffer[index]);
-
-    if (buffer[index++] == new_line_){
-      buffer[index] = '\0';
-      return XY_SUCCESS;
+    if (message.rfind(line_end_) != std::string::npos){
+      message.pop_back();
+// for CR+NL
+      if (line_end_.size() != 1)
+        message.pop_back();
+      return message;
     }
 
-    usleep(100);
+    usleep (100);
   }
-  std::cerr << "Received string exceeded buffer limits!" << std::endl;
-
-  return XY_ERROR;
 }
 
 int xyPlotter::waitOnOk(){
   char buffer[XY_BUFFER_SIZE];
+  std::string message;
   std::string ok_message = "OK!";
 
 // Here, the distance should be received.
-  receive(buffer,
-          XY_BUFFER_SIZE);
+  message = receive();
 
-  if (ok_message.compare(buffer))
+  if (ok_message.compare(message) == 0)
     return XY_SUCCESS;
-  else
+  else{
     return XY_ERROR;
+  }
 }
 
 void xyPlotter::moveAbs(double x,
@@ -79,13 +80,15 @@ void xyPlotter::moveAbs(double x,
   stringStream << "G1 X" << x << " Y" << y;
 
   send(stringStream.str());
+  std::cout << "Moving, waiting on OK...";
 
-  std::cout << "Moving, waiting on Ok...";
+  usleep(1000000);
 
 // FIXXME: Here, a timeout option can be implemented, when the distance is received.
-  waitOnOk();
+// FIXXXXME: Bad hack, timeout should be included, otherwise, infinite loop might occur.
+  while(waitOnOk() != XY_SUCCESS);
 
-  std::cout << "received!" << std::endl;
+  std::cout << "OK! received!" << std::endl;
 
   x_ = x;
   y_ = y;
@@ -114,7 +117,10 @@ void xyPlotter::moveRelY(double y){
 }
 
 void xyPlotter::goHome(){
+  std::cout << "Going to home position" << std::endl;
+
   send("G28");
+  waitOnOk();
 
   x_ = 0.0;
   y_ = 0.0;
@@ -134,14 +140,8 @@ void xyPlotter::setFlashTime(double milliseconds){
   send(stringStream.str());
 }
 
-void xyPlotter::setNewLine(char new_line){
-  if (new_line == '\n' ||
-      new_line == '\r'){
-    new_line_ = new_line;
-  }
-  else{
-    std::cerr << "Newline characters must be \\n or \\r!" << std::endl;
-  }
+void xyPlotter::setLineEnd(std::string line_end){
+  line_end_ = line_end;
 }
 
 std::string getNewLine(){
