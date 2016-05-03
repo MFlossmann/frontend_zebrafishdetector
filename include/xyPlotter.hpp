@@ -8,6 +8,9 @@
 
 #include <SerialStream.h>
 
+#define XY_MOVE_LINEAR "G1"
+#define XY_GO_HOME "G28"
+
 #define XY_NEWLINE                "\n"
 #define XY_CARRIAGE_RETURN        "\r"
 #define XY_NEWLINE_CARRIAGERETURN "\r\n"

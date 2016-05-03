@@ -77,7 +77,7 @@ int xyPlotter::waitOnOk(){
 void xyPlotter::moveAbs(double x,
                         double y){
   std::ostringstream stringStream;
-  stringStream << "G1 X" << x << " Y" << y;
+  stringStream << XY_MOVE_LINEAR << " X" << x << " Y" << y;
 
   send(stringStream.str());
   std::cout << "Moving, waiting on OK...";
@@ -119,7 +119,7 @@ void xyPlotter::moveRelY(double y){
 void xyPlotter::goHome(){
   std::cout << "Going to home position" << std::endl;
 
-  send("G28");
+  send(XY_GO_HOME);
   waitOnOk();
 
   x_ = 0.0;
