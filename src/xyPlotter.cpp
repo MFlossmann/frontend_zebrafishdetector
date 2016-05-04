@@ -1,50 +1,77 @@
 #include "xyPlotter.hpp"
 
-xyPlotter::xyPlotter() : char_size_(xyCharSize::CHAR_SIZE_8),
-                         parity_(xyParity::PARITY_NONE),
-                         flow_control_(xyFlowControl::FLOW_CONTROL_NONE),
-                         num_of_stop_bits_(1),
-                         line_end_(XY_NEWLINE_CARRIAGERETURN),
-                         relative_movement_(false)
-{}
-
-xyPlotter::~xyPlotter(){}
-
-int xyPlotter::connect(std::string device,
-                       xyBaudRate baud_rate){
+xyPlotter::xyPlotter(std::string device) : char_size_(xyCharSize::CHAR_SIZE_8),
+                                           parity_(xyParity::PARITY_NONE),
+                                           flow_control_(xyFlowControl::FLOW_CONTROL_NONE),
+                                           stop_bits_(xyStopBits::STOP_BITS_1),
+                                           line_end_(XY_NEWLINE_CARRIAGERETURN),
+                                           relative_movement_(false)
+{
+  serial_port_ = new SerialPort(device);
   serial_port_device_ = device;
+}
+
+xyPlotter::~xyPlotter(void){
+  delete serial_port_;
+}
+
+int xyPlotter::connect(xyBaudRate baud_rate){
   baud_rate_ = baud_rate;
 
-  serial_port_.Open(serial_port_device_);
-
-  serial_port_.SetBaudRate( baud_rate_);
-  serial_port_.SetCharSize(char_size_);
-  serial_port_.SetParity(parity_);
-  serial_port_.SetNumOfStopBits(num_of_stop_bits_);
-  serial_port_.SetFlowControl(flow_control_);
-
-  if (!serial_port_.good()){
+  try{
+    serial_port_->Open(baud_rate_,
+                      char_size_,
+                      parity_,
+                      stop_bits_,
+                      flow_control_);
+  }
+  catch (SerialPort::OpenFailed e){
+    std::cerr << "Opening the serial port failed!" << std::endl;
     return XY_ERROR;
   }
+  catch (SerialPort::AlreadyOpen){
+    std::cerr << "Port is already open" << std::endl;
+    return XY_ERROR;
+  }
+
+  // Not waiting creates unresponsive behaviour
+  wait();
+
   return XY_SUCCESS;
 }
 
 void xyPlotter::send(std::string message){
+  //if (!serial_port_.good())
+  //  return;
+
   message += line_end_;
 
-  serial_port_.write(message.c_str(),
-                     message.size());
+  std::vector<unsigned char> buffer;
+  while(message.size()){
+    buffer.insert(buffer.begin(),
+                  message.back());
+    message.pop_back();
+  }
+
+  serial_port_->Write(buffer);
+
+  wait();
 }
 
-std::string xyPlotter::receive(){
-  // FIXXME: This will run forever, if nothing is received
+std::string xyPlotter::receive(void){
   unsigned int index = 0;
   std::string message = "";
-  char character;
+  unsigned char character;
 
-// FIXXME: Include a timeout (if possible)
   while(true){
-    serial_port_.get(character);
+    try{
+      character = serial_port_->ReadByte(XY_TIMEOUT);
+    }
+    catch (SerialPort::ReadTimeout e)
+    {
+      std::cerr << "Runtime error: Timeout!" << std::endl;
+    }
+
     message += character;
 
     if (message.rfind(line_end_) != std::string::npos){
@@ -55,38 +82,40 @@ std::string xyPlotter::receive(){
       return message;
     }
 
-    usleep (100);
-  }
-}
+// FIXXME: Is this needed?
+//    usleep (100);
+   }
+ }
 
-int xyPlotter::waitOnOk(){
-  char buffer[XY_BUFFER_SIZE];
+double xyPlotter::waitOnOk(void){
+  std::chrono::duration<double, std::milli> elapsed;
   std::string message;
-  std::string ok_message = "OK!";
 
-// Here, the distance should be received.
-  message = receive();
+  auto start = std::chrono::high_resolution_clock::now();
+  while(1){
+    message = receive();
 
-  if (ok_message.compare(message) == 0)
-    return XY_SUCCESS;
-  else{
-    return XY_ERROR;
+    if (message.compare("OK!") == 0)
+      return elapsed.count();
+
+    auto now = std::chrono::high_resolution_clock::now();
+    elapsed = now - start;
+
+    if(elapsed.count() >= XY_TIMEOUT_MS)
+      throw std::runtime_error("Wait on OK timeout");
   }
 }
 
 void xyPlotter::moveAbs(double x,
                         double y){
+
   std::ostringstream stringStream;
   stringStream << XY_MOVE_LINEAR << " X" << x << " Y" << y;
 
   send(stringStream.str());
-  std::cout << "Moving, waiting on OK...";
+  std::cerr << "Moving to (" << x << "," << y << ") waiting on OK...";
 
-  usleep(1000000);
-
-// FIXXME: Here, a timeout option can be implemented, when the distance is received.
-// FIXXXXME: Bad hack, timeout should be included, otherwise, infinite loop might occur.
-  while(waitOnOk() != XY_SUCCESS);
+  waitOnOk();
 
   std::cout << "OK! received!" << std::endl;
 
@@ -116,10 +145,16 @@ void xyPlotter::moveRelY(double y){
   moveAbsY(y_ + y);
 }
 
-void xyPlotter::goHome(){
+void xyPlotter::goHome(void){
+  // FIXXXME: uncomment
+  //if (!serial_port_.good())
+  //  return;
+
   std::cout << "Going to home position" << std::endl;
 
-  send(XY_GO_HOME);
+  send("G28");
+
+  std::cout << "Waiting on ok..." << std::endl;
   waitOnOk();
 
   x_ = 0.0;
@@ -131,6 +166,8 @@ void xyPlotter::setFrameRate(double fps){
   stringStream << "M1 " << fps;
 
   send(stringStream.str());
+
+  waitOnOk();
 }
 
 void xyPlotter::setFlashTime(double milliseconds){
@@ -144,6 +181,10 @@ void xyPlotter::setLineEnd(std::string line_end){
   line_end_ = line_end;
 }
 
-std::string getNewLine(){
+std::string getNewLine(void){
 
+}
+
+void xyPlotter::wait(void){
+  std::this_thread::sleep_for(std::chrono::milliseconds(XY_WAIT_MS));
 }

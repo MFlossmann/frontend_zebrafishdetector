@@ -49,7 +49,7 @@ const cv::Scalar RED = cv::Scalar(0,0,0xFF);
 
 const int KEY_ESCAPE = 27;
 
-const xyBaudRate BAUD_RATE = xyBaudRate::BAUD_57600;
+const xyBaudRate BAUD_RATE = xyBaudRate::BAUD_115200;
 
 //////////////////// structs
 
@@ -155,19 +155,21 @@ void readCalibrationParameters(cv::Mat &cameraMatrix,
 }
 
 int main(int argc, char* argv[]){
-  xyPlotter xy_plotter;
+  xyPlotter xy_plotter("/dev/ttyUSB0");
 
 // return if --help option was called
   if (parseOptions(argc, argv))
     return 1;
+
+  // FIXXXXXME: remove the following line
+  cam_options_.triggerLevel = CAM_TRIGGER_RISING_EDGE;
 
   if(cam_options_.undistortImage)
     readCalibrationParameters(cam_options_.cameraMatrix,
                               cam_options_.distCoeffs);
 
 // Initiate serial communication.
-  if (xy_plotter.connect("/dev/ttyUSB0",
-                         BAUD_RATE) != XY_SUCCESS){
+  if (xy_plotter.connect(BAUD_RATE) != XY_SUCCESS){
     cerr << "Warning! Error initiating serial communication! Continuing..." << endl;
   }
   else

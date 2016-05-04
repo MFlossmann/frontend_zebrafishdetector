@@ -122,26 +122,27 @@ int setAOI(cameraOptions &cam_options){
 int initBuffers(cameraOptions &cam_options){
   int cameraStatus;
 
-  cam_options.image = cv::Mat(cam_options.aoiHeight,
-                              cam_options.aoiWidth,
-                              COLOR_DEPTH_CV);
-  cam_options.greyImage = cv::Mat(cam_options.aoiHeight,
-                                  cam_options.aoiWidth,
-                                  COLOR_DEPTH_CV_GREY);
+  // cam_options.image = cv::Mat(cam_options.aoiHeight,
+  //                             cam_options.aoiWidth,
+  //                             COLOR_DEPTH_CV);
+  // cam_options.greyImage = cv::Mat(cam_options.aoiHeight,
+  //                                 cam_options.aoiWidth,
+  //                                 COLOR_DEPTH_CV_GREY);
 
 
   cam_options.imgPtrList.resize(cam_options.ringBufferSize);
   cam_options.imgIdList.resize(cam_options.ringBufferSize);
 
 
-  cameraStatus = is_SetDisplayMode(cam_options.camHandle, IS_SET_DM_DIB);
+  cameraStatus = is_SetDisplayMode(cam_options.camHandle,
+                                   IS_SET_DM_DIB);
   switch (cameraStatus){
   case IS_SUCCESS:
-          break;
+    break;
   default:
-          cout << "Error setting the display mode to bitmap. Error code: " \
-               << cameraStatus << endl;
-          return CAM_FAILURE;
+    cout << "Error setting the display mode to bitmap. Error code: "  \
+         << cameraStatus << endl;
+    return CAM_FAILURE;
   }
 
 

@@ -6,7 +6,11 @@
 #include <sstream>
 #include <unistd.h>
 
-#include <SerialStream.h>
+#include <SerialPort.h>
+
+#include <chrono>
+#include <thread>
+#include <stdexcept>
 
 #define XY_MOVE_LINEAR "G1"
 #define XY_GO_HOME "G28"
@@ -15,17 +19,21 @@
 #define XY_CARRIAGE_RETURN        "\r"
 #define XY_NEWLINE_CARRIAGERETURN "\r\n"
 
+#define XY_TIMEOUT 10000
+const double XY_TIMEOUT_MS = 20000.0;
+
 #define XY_SUCCESS  0
 #define XY_ERROR  -1
 
 #define XY_BUFFER_SIZE  512
 
-using namespace LibSerial;
+#define XY_WAIT_MS  100
 
-typedef SerialStreamBuf::BaudRateEnum      xyBaudRate;
-typedef SerialStreamBuf::CharSizeEnum      xyCharSize;
-typedef SerialStreamBuf::ParityEnum        xyParity;
-typedef SerialStreamBuf::FlowControlEnum   xyFlowControl;
+typedef SerialPort::BaudRate      xyBaudRate;
+typedef SerialPort::CharacterSize xyCharSize;
+typedef SerialPort::Parity        xyParity;
+typedef SerialPort::FlowControl   xyFlowControl;
+typedef SerialPort::StopBits      xyStopBits;
 
 class xyPlotter{
 private:
@@ -35,8 +43,7 @@ private:
   xyCharSize char_size_;
   xyParity parity_;
   xyFlowControl flow_control_;
-
-  char num_of_stop_bits_;
+  xyStopBits stop_bits_;
 
   std::string line_end_;
 
@@ -45,20 +52,19 @@ private:
 
 
 public:
-  SerialStream serial_port_;
+  SerialPort* serial_port_;
 
-  xyPlotter();
+  xyPlotter(std::string device);
 
-  ~xyPlotter();
+  ~xyPlotter(void);
 
-  int connect(std::string device,
-              xyBaudRate baud_rate);
+  int connect(xyBaudRate baud_rate);
 
   void send(std::string message);
 
-  std::string receive();
+  std::string receive(void);
 
-  int waitOnOk();
+  double waitOnOk(void);
 
   void moveAbs(double x,
                double y);
@@ -74,9 +80,9 @@ public:
 
   void moveRelY(double y);
 
-  void goHome();
+  void goHome(void);
 
-  void getPosition();
+  void getPosition(void);
 
   void setFrameRate(double fps);
 
@@ -84,5 +90,7 @@ public:
 
   void setLineEnd(std::string line_end);
 
-  std::string getNewLine();
+  std::string getNewLine(void);
+
+  void wait(void);
 };

@@ -1,6 +1,10 @@
 #include <string>
 #include <iostream>
 #include <unistd.h>
+#include <math.h>
+
+#include <chrono>
+#include <thread>
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -29,13 +33,20 @@ enum { DETECTION = 0, CAPTURING = 1, CALIBRATED = 2 };
 
 //////////////////// Consts
 const string SERIAL_DEVICE = "/dev/ttyUSB0";
-const xyBaudRate BAUD_RATE = xyBaudRate::BAUD_57600;
+const xyBaudRate BAUD_RATE = xyBaudRate::BAUD_115200;
 
 const int KEY_ESCAPE = 27;
 
 const double FRAMERATE = 10.;
 const double FLASHTIME = 0.2;
 const double EXPOSURE = 4;
+
+// For the calibration run
+const int PARTS = 4;
+const double MIN_X = 70;
+const double MIN_Y = 170;
+const double MAX_X = 250;
+const double MAX_Y = 270;
 
 const string CONFIG_PATH_DEFAULT = "../cfg/conf_calib.xml";
 
@@ -475,18 +486,24 @@ int main(int argc, char** argv){
 
 
 //////////////////// Init serial communication
-  xyPlotter xy_plotter;
+  xyPlotter xy_plotter(SERIAL_DEVICE);
 
-  if (xy_plotter.connect(SERIAL_DEVICE,
-                         BAUD_RATE) != XY_SUCCESS){
-    cerr << "Error initiating serial communication! Terminating..." << endl;
-    return -1;
-  }
-  else
-    cout << "Serial communication initiated..." << endl;
+ if (xy_plotter.connect(BAUD_RATE) != XY_SUCCESS){
+   cerr << "Error initiating serial communication! Terminating..." << endl;
+   return -1;
+ }
+ else
+   cout << "Serial communication initiated..." << endl;
 
-  xy_plotter.goHome();
-  xy_plotter.moveAbs(200,200);
+#define SLEEP_TIME 100000000
+
+xy_plotter.setFrameRate(FRAMERATE);
+// xy_plotter.setFlashTime(FLASHTIME);
+
+ xy_plotter.moveAbs(10,10);
+ xy_plotter.goHome();
+
+
 
 //////////////////// Connect to the camera
   cam::cameraOptions cam_options;
@@ -497,6 +514,8 @@ int main(int argc, char** argv){
   cam_options.ringBufferSize = 1;
   cam_options.undistortImage = false;
 
+  cam_options.triggerLevel = CAM_TRIGGER_RISING_EDGE;
+
   int status = 0;
   status |= cam::initialize(cam_options);
   status |= cam::setOptions(cam_options);
@@ -505,7 +524,6 @@ int main(int argc, char** argv){
   if (status != CAM_SUCCESS)
     return -1;
 
-//////////////////// Main camera loop
   int currentImgIndex = -1;
   char* currentImgPtr = 0;
   int currentImgId = -1;
@@ -517,100 +535,114 @@ int main(int argc, char** argv){
   cv::Mat image = Mat(cam_options.aoiHeight,
                       cam_options.aoiWidth,
                       CV_8UC3);
-  do
-  {
-    int captureStatus;
-    ++currentImgIndex %= cam_options.ringBufferSize;
-    currentImgPtr = cam_options.imgPtrList[currentImgIndex];
-    currentImgId = cam_options.imgIdList[currentImgIndex];
+//////////////////// Main camera loop
+  double delta_x = MAX_X - MIN_X;
+  double delta_y = MAX_Y - MIN_Y;
+  double inc_x = delta_x / (double)PARTS;
+  double inc_y = delta_y / (double)PARTS;
+
+  xy_plotter.moveAbs(MIN_X,
+                     MIN_Y);
+
+  for(int i=0;i<PARTS;i++){
+    for(int j=0;j<PARTS;j++){
+      int captureStatus;
+      ++currentImgIndex %= cam_options.ringBufferSize;
+      currentImgPtr = cam_options.imgPtrList[currentImgIndex];
+      currentImgId = cam_options.imgIdList[currentImgIndex];
 
 
-    is_SetImageMem(cam_options.camHandle,
-                   currentImgPtr,
-                   currentImgId);
+      is_SetImageMem(cam_options.camHandle,
+                     currentImgPtr,
+                     currentImgId);
 
-    captureStatus = is_FreezeVideo(cam_options.camHandle,
-                                   IS_WAIT);
-    switch (captureStatus) {
-    case IS_SUCCESS:
-      break;
-    default:
-      cerr << "Error capturing image! Error code: " << captureStatus << endl;
-      break;
-    } // switch captureStatus (FreezeVideo)
+      captureStatus = is_FreezeVideo(cam_options.camHandle,
+                                     IS_WAIT);
+      switch (captureStatus) {
+      case IS_SUCCESS:
+        break;
+      case IS_TIMED_OUT:
+        cerr << "Error capturing image! Timeout!" << endl;
+      default:
+        cerr << "Error capturing image! Error code: " << captureStatus << endl;
+        break;
+      } // switch captureStatus (FreezeVideo)
 
 
 // copy the image to a opencv-manageable format.
-    is_CopyImageMem(cam_options.camHandle,
-                    currentImgPtr,
-                    currentImgId,
-                    //(char *) greyImage.data);
-                    reinterpret_cast<char*>(greyImage.data));
+      is_CopyImageMem(cam_options.camHandle,
+                      currentImgPtr,
+                      currentImgId,
+                      //(char *) greyImage.data);
+                      reinterpret_cast<char*>(greyImage.data));
 
-    // Release the image buffer
-    captureStatus |= is_UnlockSeqBuf(cam_options.camHandle,
-                                     currentImgIndex,
-                                     currentImgPtr);
+      // Release the image buffer
+      captureStatus |= is_UnlockSeqBuf(cam_options.camHandle,
+                                       currentImgIndex,
+                                       currentImgPtr);
 
 // If enough data is available, stop calibration and show result.
-    if( mode == CAPTURING && imagePoints.size() >= (unsigned)settings.nrFrames )
-    {
-      cout << "Enough data points collected. Calibrating..." << endl;
-      // if( cv::runCalibrationAndSave(settings,
-      //                               imageSize,
-      //                               cameraMatrix,
-      //                               distCoeffs,
-      //                               imagePoints))
-      //  mode = CALIBRATED;
-      // else
-      //  mode = DETECTION;
-    }
+      if( mode == CAPTURING && imagePoints.size() >= (unsigned)settings.nrFrames )
+      {
+        cout << "Enough data points collected. Calibrating..." << endl;
+        // if( cv::runCalibrationAndSave(settings,
+        //                               imageSize,
+        //                               cameraMatrix,
+        //                               distCoeffs,
+        //                               imagePoints))
+        //  mode = CALIBRATED;
+        // else
+        //  mode = DETECTION;
+      }
 
-    imageSize = image.size();
-    if (settings.flipVertical)
-      cv::flip(image,
-               image,
-               0);
+      imageSize = image.size();
+      if (settings.flipVertical)
+        cv::flip(image,
+                 image,
+                 0);
 
-    std::vector<cv::Point2f> pointBuffer;
-    bool found;
+      std::vector<cv::Point2f> pointBuffer;
+      bool found;
 
 // get the chessboard features
-    found = cv::findChessboardCorners(greyImage,
-                                      settings.boardSize,
-                                      pointBuffer,
-                                      CV_CALIB_CB_ADAPTIVE_THRESH |
-                                      CV_CALIB_CB_FAST_CHECK |
-                                      CV_CALIB_CB_NORMALIZE_IMAGE);
+      found = cv::findChessboardCorners(greyImage,
+                                        settings.boardSize,
+                                        pointBuffer,
+                                        CV_CALIB_CB_ADAPTIVE_THRESH |
+                                        CV_CALIB_CB_FAST_CHECK |
+                                        CV_CALIB_CB_NORMALIZE_IMAGE);
 
 // Copy the grey image to a coloured one.
-    image = greyImage.clone();
-    cv::cvtColor(image,
-                 image,
-                 CV_GRAY2RGB);
+      image = greyImage.clone();
+      cv::cvtColor(image,
+                   image,
+                   CV_GRAY2RGB);
 
 // if Chessboard was found
-    if (found){
+      if (found){
 
 // improve the found corners' coordinate accuracy
-      cv::cornerSubPix(greyImage,
-                       pointBuffer,
-                       cv::Size(11,11),
-                       cv::Size(-1,-1),
-                       cv::TermCriteria(CV_TERMCRIT_EPS+CV_TERMCRIT_ITER,
-                                        30, 0.1));
+        cv::cornerSubPix(greyImage,
+                         pointBuffer,
+                         cv::Size(11,11),
+                         cv::Size(-1,-1),
+                         cv::TermCriteria(CV_TERMCRIT_EPS+CV_TERMCRIT_ITER,
+                                          30, 0.1));
 
 // Draw the corners
-      cv::drawChessboardCorners(image,
-                                settings.boardSize,
-                                cv::Mat(pointBuffer),
-                                found);
+        cv::drawChessboardCorners(image,
+                                  settings.boardSize,
+                                  cv::Mat(pointBuffer),
+                                  found);
+      }
+
+      cv::namedWindow("Image View",
+                      CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+      cv::imshow("Image View",
+                 image);
+
+      xy_plotter.moveRelX(inc_x * pow(-1.0,(double) i));
     }
-
-    cv::namedWindow("Image View",
-                    CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
-    cv::imshow("Image View",
-               image);
-
-  } while (cv::waitKey(10) != KEY_ESCAPE); // image capture loop.
+    xy_plotter.moveRelY(inc_y);
+  }// while (cv::waitKey(10) != KEY_ESCAPE); // image capture loop.
 }

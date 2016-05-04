@@ -12,6 +12,8 @@ using std::endl;
 #define CAM_FAILURE -1
 #define CAM_WARNING 1
 
+#define CAM_TRIGGER_RISING_EDGE IS_SET_TRIGGER_LO_HI
+#define CAM_TRIGGER_SOFTWARE IS_SET_TRIGGER_SOFTWARE
 
 namespace cam{
 
@@ -32,6 +34,8 @@ namespace cam{
       aoiHeight = imageHeight;
       aoiPosX = 0;
       aoiPosY = 0;
+
+      triggerLevel = CAM_TRIGGER_RISING_EDGE;
 
       cameraMatrix = cv::Mat::eye(3,
                                   3,
@@ -58,6 +62,8 @@ namespace cam{
     bool undistortImage;
     cv::Mat cameraMatrix;
     cv::Mat distCoeffs;
+
+    int triggerLevel;
 
     cv::Mat image, greyImage;
     std::vector<char*> imgPtrList;
