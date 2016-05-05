@@ -69,7 +69,7 @@ std::string xyPlotter::receive(void){
     }
     catch (SerialPort::ReadTimeout e)
     {
-      std::cerr << "Runtime error: Timeout!" << std::endl;
+      std::cerr << "Runtime error: Timeout at SerialPort->ReadByte!" << std::endl;
     }
 
     message += character;

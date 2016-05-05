@@ -162,7 +162,7 @@ int main(int argc, char* argv[]){
     return 1;
 
   // FIXXXXXME: remove the following line
-  cam_options_.triggerLevel = CAM_TRIGGER_RISING_EDGE;
+  cam_options_.captureMode = cam::captureModeEnum::HARDWARE_LIVE;
 
   if(cam_options_.undistortImage)
     readCalibrationParameters(cam_options_.cameraMatrix,

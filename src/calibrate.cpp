@@ -1,8 +1,10 @@
 #include <string>
 #include <iostream>
+#include <sstream>
 #include <unistd.h>
 #include <math.h>
 
+#include <ctime>
 #include <chrono>
 #include <thread>
 
@@ -217,6 +219,12 @@ static void saveCameraParams(Settings& s,
                              const vector<vector<Point2f> >& imagePoints,
                              double totalAvgErr );
 
+static void recordCalibratingImage(cam::cameraOptions& cam_options,
+                                   int &currentImgIndex,
+                                   Mat &greyImage,
+                                   Mat &image,
+                                   std::vector<std::vector<cv::Point2f> > &imagePoints);
+
 
 
 string getBinPath() {
@@ -344,8 +352,14 @@ static bool runCalibration(Settings& s,
     objectPoints.resize(imagePoints.size(),objectPoints[0]);
 
     //Find intrinsic and extrinsic camera parameters
-    double rms = calibrateCamera(objectPoints, imagePoints, imageSize, cameraMatrix,
-                                 distCoeffs, rvecs, tvecs, s.flag|CV_CALIB_FIX_K4|CV_CALIB_FIX_K5);
+    double rms = calibrateCamera(objectPoints,
+                                 imagePoints,
+                                 imageSize,
+                                 cameraMatrix,
+                                 distCoeffs,
+                                 rvecs,
+                                 tvecs,
+                                 s.flag|CV_CALIB_FIX_K4|CV_CALIB_FIX_K5);
 
     cout << "Re-projection error reported by calibrateCamera: "<< rms << endl;
 
@@ -467,6 +481,137 @@ static double computeReprojectionErrors(const vector<vector<Point3f> >& objectPo
     return std::sqrt(totalErr/totalPoints);
 }
 
+bool runCalibrationAndSave(Settings& s,
+                           Size imageSize,
+                           Mat&  cameraMatrix,
+                           Mat& distCoeffs,
+                           vector<vector<Point2f> > imagePoints)
+{
+  vector<Mat> rvecs, tvecs;
+  vector<float> reprojErrs;
+  double totalAvgErr = 0;
+
+  bool ok = runCalibration(s,
+                           imageSize,
+                           cameraMatrix,
+                           distCoeffs,
+                           imagePoints,
+                           rvecs,
+                           tvecs,
+                           reprojErrs,
+                           totalAvgErr);
+  cout << (ok ? "Calibration succeeded" : "Calibration failed")
+       << ". avg re projection error = "  << totalAvgErr ;
+
+  if( ok )
+    saveCameraParams(s,
+                     imageSize,
+                     cameraMatrix,
+                     distCoeffs,
+                     rvecs,
+                     tvecs,
+                     reprojErrs,
+                     imagePoints,
+                     totalAvgErr);
+  return ok;
+}
+
+
+static void recordCalibratingImage(cam::cameraOptions cam_options,
+                                   Settings &settings,
+                                   int &currentImgIndex,
+                                   cv::Mat &greyImage,
+                                   cv::Mat &image,
+                                   std::vector<std::vector<cv::Point2f> > &imagePoints){
+
+
+  ++currentImgIndex %= cam_options.ringBufferSize;
+  char* currentImgPtr = cam_options.imgPtrList[currentImgIndex];
+  int currentImgId = cam_options.imgIdList[currentImgIndex];
+
+
+  is_SetImageMem(cam_options.camHandle,
+                 currentImgPtr,
+                 currentImgId);
+
+  int captureStatus;
+  captureStatus = is_FreezeVideo(cam_options.camHandle,
+                                 IS_WAIT);
+
+  switch (captureStatus) {
+  case IS_SUCCESS:
+    cout << "Image captured!" << endl;
+    break;
+  case IS_TIMED_OUT:
+    cerr << "Error capturing image! Timeout!" << endl;
+  default:
+    cerr << "Error capturing image! Error code: " << captureStatus << endl;
+    break;
+  } // switch captureStatus (FreezeVideo)
+
+// copy the image to a opencv-manageable format.
+  is_CopyImageMem(cam_options.camHandle,
+                  currentImgPtr,
+                  currentImgId,
+                  //(char *) greyImage.data);
+                  reinterpret_cast<char*>(greyImage.data));
+
+// Release the image buffer
+  captureStatus |= is_UnlockSeqBuf(cam_options.camHandle,
+                                   currentImgIndex,
+                                   currentImgPtr);
+
+  if (settings.flipVertical)
+    cv::flip(image,
+             image,
+             0);
+
+
+  std::vector<cv::Point2f> pointBuffer;
+  bool found;
+
+// get the chessboard features
+  found = cv::findChessboardCorners(greyImage,
+                                    settings.boardSize,
+                                    pointBuffer,
+                                    CV_CALIB_CB_ADAPTIVE_THRESH |
+                                    CV_CALIB_CB_FAST_CHECK |
+                                    CV_CALIB_CB_NORMALIZE_IMAGE);
+
+// Copy the grey image to a coloured one.
+  image = greyImage.clone();
+  cv::cvtColor(image,
+               image,
+               CV_GRAY2RGB);
+
+  if (found){
+    cout << "Chessboard was found..." << endl;
+
+// improve the found corners' coordinate accuracy
+    cv::cornerSubPix(greyImage,
+                     pointBuffer,
+                     cv::Size(11,11),
+                     cv::Size(-1,-1),
+                     cv::TermCriteria(CV_TERMCRIT_EPS+CV_TERMCRIT_ITER,
+                                      30, 0.1));
+
+// Draw the corners
+    cv::drawChessboardCorners(image,
+                              settings.boardSize,
+                              cv::Mat(pointBuffer),
+                              found);
+
+// Save the found cornerpoints
+    imagePoints.push_back(pointBuffer);
+  } // chessboard found
+
+  cv::namedWindow("Image View",
+                  CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+  cv::imshow("Image View",
+             image);
+  waitKey(10);
+}
+
 
 //////////////////// MAIN FUNCTION ////////////////////
 int main(int argc, char** argv){
@@ -478,7 +623,7 @@ int main(int argc, char** argv){
 
   std::vector<std::vector<cv::Point2f> > imagePoints;
   cv::Mat cameraMatrix, distCoeffs;
-  cv::Size imageSize;
+
   int mode = settings.inputType == Settings::IMAGE_LIST ? CAPTURING : DETECTION;
   clock_t prevTimestamp = 0;
   const cv::Scalar RED(0,0,255), GREEN(0,255,0);
@@ -493,12 +638,10 @@ int main(int argc, char** argv){
    return -1;
  }
  else
-   cout << "Serial communication initiated..." << endl;
+   cout << "Serial communication initialized..." << endl;
 
-#define SLEEP_TIME 100000000
-
-xy_plotter.setFrameRate(FRAMERATE);
-// xy_plotter.setFlashTime(FLASHTIME);
+ //xy_plotter.setFrameRate(FRAMERATE);
+ //xy_plotter.setFlashTime(FLASHTIME);
 
  xy_plotter.moveAbs(10,10);
  xy_plotter.goHome();
@@ -514,20 +657,18 @@ xy_plotter.setFrameRate(FRAMERATE);
   cam_options.ringBufferSize = 1;
   cam_options.undistortImage = false;
 
-  cam_options.triggerLevel = CAM_TRIGGER_RISING_EDGE;
+  cam_options.captureMode = cam::captureModeEnum::SOFTWARE_FREEZE;
 
   int status = 0;
   status |= cam::initialize(cam_options);
-  status |= cam::setOptions(cam_options);
   status |= cam::initBuffers(cam_options);
+  status |= cam::setOptions(cam_options);
+
 
   if (status != CAM_SUCCESS)
     return -1;
 
   int currentImgIndex = -1;
-  char* currentImgPtr = 0;
-  int currentImgId = -1;
-
 
   cv::Mat greyImage = Mat(cam_options.aoiHeight,
                           cam_options.aoiWidth,
@@ -535,6 +676,9 @@ xy_plotter.setFrameRate(FRAMERATE);
   cv::Mat image = Mat(cam_options.aoiHeight,
                       cam_options.aoiWidth,
                       CV_8UC3);
+
+  cv::Size imageSize = image.size();
+
 //////////////////// Main camera loop
   double delta_x = MAX_X - MIN_X;
   double delta_y = MAX_Y - MIN_Y;
@@ -544,105 +688,133 @@ xy_plotter.setFrameRate(FRAMERATE);
   xy_plotter.moveAbs(MIN_X,
                      MIN_Y);
 
-  for(int i=0;i<PARTS;i++){
+  for(int i=0;i<PARTS + 1;i++){
     for(int j=0;j<PARTS;j++){
-      int captureStatus;
-      ++currentImgIndex %= cam_options.ringBufferSize;
-      currentImgPtr = cam_options.imgPtrList[currentImgIndex];
-      currentImgId = cam_options.imgIdList[currentImgIndex];
 
-
-      is_SetImageMem(cam_options.camHandle,
-                     currentImgPtr,
-                     currentImgId);
-
-      captureStatus = is_FreezeVideo(cam_options.camHandle,
-                                     IS_WAIT);
-      switch (captureStatus) {
-      case IS_SUCCESS:
-        break;
-      case IS_TIMED_OUT:
-        cerr << "Error capturing image! Timeout!" << endl;
-      default:
-        cerr << "Error capturing image! Error code: " << captureStatus << endl;
-        break;
-      } // switch captureStatus (FreezeVideo)
-
-
-// copy the image to a opencv-manageable format.
-      is_CopyImageMem(cam_options.camHandle,
-                      currentImgPtr,
-                      currentImgId,
-                      //(char *) greyImage.data);
-                      reinterpret_cast<char*>(greyImage.data));
-
-      // Release the image buffer
-      captureStatus |= is_UnlockSeqBuf(cam_options.camHandle,
-                                       currentImgIndex,
-                                       currentImgPtr);
-
-// If enough data is available, stop calibration and show result.
-      if( mode == CAPTURING && imagePoints.size() >= (unsigned)settings.nrFrames )
-      {
-        cout << "Enough data points collected. Calibrating..." << endl;
-        // if( cv::runCalibrationAndSave(settings,
-        //                               imageSize,
-        //                               cameraMatrix,
-        //                               distCoeffs,
-        //                               imagePoints))
-        //  mode = CALIBRATED;
-        // else
-        //  mode = DETECTION;
-      }
-
-      imageSize = image.size();
-      if (settings.flipVertical)
-        cv::flip(image,
-                 image,
-                 0);
-
-      std::vector<cv::Point2f> pointBuffer;
-      bool found;
-
-// get the chessboard features
-      found = cv::findChessboardCorners(greyImage,
-                                        settings.boardSize,
-                                        pointBuffer,
-                                        CV_CALIB_CB_ADAPTIVE_THRESH |
-                                        CV_CALIB_CB_FAST_CHECK |
-                                        CV_CALIB_CB_NORMALIZE_IMAGE);
-
-// Copy the grey image to a coloured one.
-      image = greyImage.clone();
-      cv::cvtColor(image,
-                   image,
-                   CV_GRAY2RGB);
-
-// if Chessboard was found
-      if (found){
-
-// improve the found corners' coordinate accuracy
-        cv::cornerSubPix(greyImage,
-                         pointBuffer,
-                         cv::Size(11,11),
-                         cv::Size(-1,-1),
-                         cv::TermCriteria(CV_TERMCRIT_EPS+CV_TERMCRIT_ITER,
-                                          30, 0.1));
-
-// Draw the corners
-        cv::drawChessboardCorners(image,
-                                  settings.boardSize,
-                                  cv::Mat(pointBuffer),
-                                  found);
-      }
-
-      cv::namedWindow("Image View",
-                      CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
-      cv::imshow("Image View",
-                 image);
+      recordCalibratingImage(cam_options,
+                             settings,
+                             currentImgIndex,
+                             greyImage,
+                             image,
+                             imagePoints);
 
       xy_plotter.moveRelX(inc_x * pow(-1.0,(double) i));
     }
-    xy_plotter.moveRelY(inc_y);
+
+    recordCalibratingImage(cam_options,
+                           settings,
+                           currentImgIndex,
+                           greyImage,
+                           image,
+                           imagePoints);
+
+    // don't move up when finished
+    if (i!=PARTS)
+      xy_plotter.moveRelY(inc_y);
   }// while (cv::waitKey(10) != KEY_ESCAPE); // image capture loop.
+
+
+// Stop calibration and show result.
+    cout << "Enough data points collected. Calibrating..." << endl;
+    runCalibrationAndSave(settings,
+                          imageSize,
+                          cameraMatrix,
+                          distCoeffs,
+                          imagePoints);
+
+//////////////////// Calibration finished. Go to a spot where you can properly see the work
+    xy_plotter.moveAbs((MIN_X + MAX_X) / 2,
+                       (MIN_Y + MAX_Y) / 2);
+
+    do
+    {
+
+
+      ++currentImgIndex %= cam_options.ringBufferSize;
+      char* currentImgPtr = cam_options.imgPtrList[currentImgIndex];
+      int currentImgId = cam_options.imgIdList[currentImgIndex];
+
+
+  is_SetImageMem(cam_options.camHandle,
+                 currentImgPtr,
+                 currentImgId);
+
+  int captureStatus;
+  captureStatus = is_FreezeVideo(cam_options.camHandle,
+                                 IS_WAIT);
+
+  switch (captureStatus) {
+  case IS_SUCCESS:
+    break;
+  case IS_TIMED_OUT:
+    cerr << "Error capturing image! Timeout!" << endl;
+  default:
+    cerr << "Error capturing image! Error code: " << captureStatus << endl;
+    break;
+  } // switch captureStatus (FreezeVideo)
+
+// copy the image to a opencv-manageable format.
+  is_CopyImageMem(cam_options.camHandle,
+                  currentImgPtr,
+                  currentImgId,
+                  reinterpret_cast<char*>(greyImage.data));
+
+// Release the image buffer
+  captureStatus |= is_UnlockSeqBuf(cam_options.camHandle,
+                                   currentImgIndex,
+                                   currentImgPtr);
+
+
+      cv::Mat tmp = greyImage.clone();
+
+      cv::undistort(tmp,
+                    greyImage,
+                    cameraMatrix,
+                    distCoeffs);
+
+      cv::namedWindow("Undistorted image",
+                      CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+
+      cv::imshow("Undistorted image",
+                 greyImage);
+
+      switch (waitKey(10)) {
+      case 0x73: { // s
+        std::ostringstream image_path;
+        time_t t = time(0);
+        struct tm * now = localtime( & t);
+        image_path << "/tmp/"
+                   << "calibrated_pic_"
+                   << (now->tm_year + 1990) << '-'
+                   << (now->tm_mon + 1) << '-'
+                   << now->tm_mday << '_'
+                   << now->tm_hour << now->tm_min << now->tm_sec
+                   << ".png";
+
+        // FIXXME: Maybe choose the image path?
+        cv::imwrite (image_path.str(),
+                     greyImage);
+
+        cout << "Image saved" << endl;
+        break;
+      }
+      case 0x1b:  // escape
+        exit(EXIT_SUCCESS);
+        break;
+      case 0x0d: { // enter
+        double new_x, new_y;
+        cout << "Enter new X coordinate: ";
+        std::cin >> new_x;
+        cout << "\nEnter new Y coordinate: ";
+        std::cin >> new_y;
+
+        xy_plotter.moveAbs(new_x,
+                           new_y);
+        break;
+      }
+      default:
+        break;
+      }
+    } while (waitKey(10) != 27);
+
 }

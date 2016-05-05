@@ -17,6 +17,11 @@ using std::endl;
 
 namespace cam{
 
+  enum captureModeEnum{
+    HARDWARE_LIVE,
+    SOFTWARE_FREEZE
+  };
+
 //////////////////// consts
   const int IMAGE_WIDTH = 1280;
   const int IMAGE_HEIGHT = 1024;
@@ -35,7 +40,7 @@ namespace cam{
       aoiPosX = 0;
       aoiPosY = 0;
 
-      triggerLevel = CAM_TRIGGER_RISING_EDGE;
+      captureMode = captureModeEnum::HARDWARE_LIVE;
 
       cameraMatrix = cv::Mat::eye(3,
                                   3,
@@ -63,7 +68,7 @@ namespace cam{
     cv::Mat cameraMatrix;
     cv::Mat distCoeffs;
 
-    int triggerLevel;
+    captureModeEnum captureMode;
 
     cv::Mat image, greyImage;
     std::vector<char*> imgPtrList;

@@ -3,32 +3,36 @@
 namespace cam{
 
   int initialize(cameraOptions &cam_options){
-  cam_options.camHandle = 0; // select the first available camera.
-  int cameraStatus = is_InitCamera(&cam_options.camHandle, NULL);
+    cam_options.camHandle = 0; // select the first available camera.
+    int cameraStatus = is_InitCamera(&cam_options.camHandle, NULL);
 
-  switch (cameraStatus){
-  case IS_SUCCESS:
-    std::cout << "Camera " << cam_options.camHandle << " initialized!" << std::endl;
-    return CAM_SUCCESS;
+    switch (cameraStatus){
+    case IS_SUCCESS:
+      std::cout << "Camera " << cam_options.camHandle << " initialized!" << std::endl;
+      return CAM_SUCCESS;
 
-  case IS_CANT_OPEN_DEVICE:
-    cout << "Error initializing, can't access the camera. Is it connected?\n Are you sure, it has power?" << endl;
-    return CAM_FAILURE;
+    case IS_CANT_OPEN_DEVICE:
+      cout << "Error initializing, can't access the camera. Is it connected?\n Are you sure, it has power?" << endl;
+      return CAM_FAILURE;
 
-  default:
-    std::cout << "Error initializing camera. Err no. " << cameraStatus << std::endl;
-    return CAM_FAILURE;
-  } // switch cameraStatus
+    default:
+      std::cout << "Error initializing camera. Err no. " << cameraStatus << std::endl;
+      return CAM_FAILURE;
+    } // switch cameraStatus
 
-} // initialize
+  } // initialize
 
 
 int setOptions(cameraOptions &cam_options){
   int cameraStatus;
 
-  // Trigger mode
-  cameraStatus = is_SetExternalTrigger(cam_options.camHandle,
-                                       IS_SET_TRIGGER_LO_HI); // Triggered by rising signal edge
+  // Live mode or single image mode
+  if(cam_options.captureMode == HARDWARE_LIVE)
+    cameraStatus = is_SetExternalTrigger(cam_options.camHandle,
+                                         CAM_TRIGGER_RISING_EDGE); // Triggered by rising signal edge
+  else
+    cameraStatus = is_SetExternalTrigger(cam_options.camHandle,
+                                         CAM_TRIGGER_SOFTWARE);
 
   switch (cameraStatus){
   case IS_SUCCESS:
@@ -37,7 +41,6 @@ int setOptions(cameraOptions &cam_options){
     cout << "Error setting the trigger! Err no. " << cameraStatus << endl;
     return CAM_FAILURE;
   } // switch cameraStatus
-
 
   // Framerate
   cameraStatus = is_SetFrameRate(cam_options.camHandle,
@@ -54,7 +57,6 @@ int setOptions(cameraOptions &cam_options){
     cout << "Error setting framerate. Err no. " << cameraStatus << endl;
     return CAM_FAILURE;
   } // switch cameraStatus
-
 
   // Exposure time set to specific value
   cameraStatus = is_Exposure(cam_options.camHandle,
@@ -129,10 +131,8 @@ int initBuffers(cameraOptions &cam_options){
   //                                 cam_options.aoiWidth,
   //                                 COLOR_DEPTH_CV_GREY);
 
-
   cam_options.imgPtrList.resize(cam_options.ringBufferSize);
   cam_options.imgIdList.resize(cam_options.ringBufferSize);
-
 
   cameraStatus = is_SetDisplayMode(cam_options.camHandle,
                                    IS_SET_DM_DIB);
