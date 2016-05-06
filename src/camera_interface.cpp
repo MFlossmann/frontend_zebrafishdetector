@@ -187,6 +187,41 @@ int initBuffers(cameraOptions &cam_options){
 
   } // startVideoCapture
 
+  int getImage(const cameraOptions &cam_options,
+               int timeout,
+               int current_buffer){
+    char* image_pointer = cam_options.imgPtrList[current_buffer];
+    int image_id = cam_options.imgIdList[current_buffer];
+
+    if (cam_options.captureMode == captureModeEnum::HARDWARE_LIVE){
+      return is_WaitForNextImage(cam_options.camHandle,
+                                 timeout,
+                                 &image_pointer,
+                                 &image_id);
+    } // Live mode
+    else if (cam_options.captureMode == captureModeEnum::HARDWARE_FREEZE ||
+             cam_options.captureMode == captureModeEnum::SOFTWARE_FREEZE){
+      is_SetImageMem(cam_options.camHandle,
+                     image_pointer,
+                     image_id);
+      return is_FreezeVideo(cam_options.camHandle,
+                            timeout);
+    } // Freeze video
+    else{
+      throw std::logic_error("Logic error at getImage in camera_interface.cpp:\nOnly Hardware modes are currently supported.");
+    } // Not supported yet
+  } // getImage
+
+  int freeBuffer(const cameraOptions &cam_options,
+                 int current_buffer){
+    if (cam_options.captureMode == captureModeEnum::HARDWARE_LIVE)
+      return is_UnlockSeqBuf(cam_options.camHandle,
+                             cam_options.imgIdList[current_buffer],
+                             cam_options.imgPtrList[current_buffer]);
+    else // in freeze mode you don't have to release the buffers!
+      return 0;
+  }
+
 
 void getCaptureStatus (UEYE_CAPTURE_STATUS_INFO capture_status_info){
   cout << "The following errors occured:" << endl;

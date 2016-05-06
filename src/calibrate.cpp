@@ -556,11 +556,6 @@ static void recordCalibratingImage(cam::cameraOptions cam_options,
                   //(char *) greyImage.data);
                   reinterpret_cast<char*>(greyImage.data));
 
-// Release the image buffer
-  captureStatus |= is_UnlockSeqBuf(cam_options.camHandle,
-                                   currentImgIndex,
-                                   currentImgPtr);
-
   if (settings.flipVertical)
     cv::flip(image,
              image,

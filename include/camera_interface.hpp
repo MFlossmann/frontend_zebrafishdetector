@@ -19,6 +19,7 @@ namespace cam{
 
   enum captureModeEnum{
     HARDWARE_LIVE,
+    HARDWARE_FREEZE,
     SOFTWARE_FREEZE
   };
 
@@ -91,6 +92,13 @@ namespace cam{
   int initBuffers(cameraOptions &cam_options);
 
   int startVideoCapture(cameraOptions &cam_options);
+
+  int getImage(const cameraOptions &cam_options,
+               int timeout,
+               int current_buffer);
+
+  int freeBuffer(const cameraOptions &cam_options,
+                 int current_buffer);
 
   void getCaptureStatus(UEYE_CAPTURE_STATUS_INFO capture_status_info);
 }
