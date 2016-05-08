@@ -33,7 +33,7 @@ const std::string CONFIG_FILE_DEFAULT = "../cfg/front_end.cfg";
 const std::string TEMPLATE_FILE_DEFAULT = "../../rings.png";
 const std::string UNDISTORT_FILE_DEFAULT = "../cfg/camera_data.yml";
 
-const double DEFAULT_FRAMERATE = 5.0;
+const double DEFAULT_FRAMERATE = 1.0;
 const double DEFAULT_EXPOSURE_MS = 4.0;
 const double DEFAULT_FLASH_TIME = 1.0;
 const int IMAGE_TIMEOUT = 500;
@@ -41,6 +41,8 @@ const int TIMEOUT_COUNTER_MAX = 10;
 
 const int RINGBUFFER_SIZE_DEFAULT = 10;
 const std::string WINDOW_NAME = "Display Image (ESC to close)";
+
+const int CANNY_MAX_DEFAULT = 80;
 
 const cv::Scalar YELLOW = cv::Scalar(0,0xFF,0xFF);
 const cv::Scalar RED = cv::Scalar(0,0,0xFF);
@@ -58,6 +60,7 @@ struct simulationOptions{
 //////////////////// globals
 cam::cameraOptions cam_options_;
 std::string template_path_;
+imProcOptions improc_options_;
 simulationOptions sim_options_;
 
 //////////////////// functions
@@ -98,6 +101,7 @@ int parseOptions(int argc, char* argv[]){
     ("buffer_size,b", po::value<unsigned int>(&cam_options_.ringBufferSize)->default_value(RINGBUFFER_SIZE_DEFAULT), "size of image ringbuffer")
     ("undistort,u", po::value<bool>(&cam_options_.undistortImage)->default_value(true), "undistort the image?")
     ("template,t", po::value<std::string>(&template_path_)->default_value(binary_path + TEMPLATE_FILE_DEFAULT), "Template file.")
+    ("canny,m", po::value<int>(&improc_options_.cannyMaxThreshold)->default_value(CANNY_MAX_DEFAULT), "Max Threshold for the canny edge filter (circle detection)")
     ;
 
   po::options_description cmdline_options;
@@ -166,13 +170,16 @@ void readCalibrationParameters(cv::Mat &cameraMatrix,
 int main(int argc, char* argv[]){
   xyPlotter xy_plotter("/dev/ttyUSB0");
 
+  cv::Mat display;
+
 // return if --help option was called
   if (parseOptions(argc, argv))
     return 1;
 
   bool simulation = sim_options_.sim_mode;
 
-  cam_options_.captureMode = cam::captureModeEnum::SOFTWARE_FREEZE;
+  cam_options_.captureMode = cam::captureModeEnum::HARDWARE_LIVE;
+  cam_options_.flashTime = DEFAULT_FLASH_TIME;
 
   if(cam_options_.undistortImage)
     readCalibrationParameters(cam_options_.cameraMatrix,
@@ -187,8 +194,8 @@ int main(int argc, char* argv[]){
       cerr << "Serial communication initiated." << endl;
 
     xy_plotter.goHome();
-    xy_plotter.moveAbs(150,
-                       150);
+    xy_plotter.moveAbs(200,
+                       50);
 
 // Set arduino controlled pparameters of the image capturing
     xy_plotter.setFrameRate(cam_options_.framerate);
@@ -198,15 +205,17 @@ int main(int argc, char* argv[]){
     if (cam::initialize(cam_options_) != CAM_SUCCESS)
       return -1;
 
+    cam::initBuffers(cam_options_);
+
     if (cam::setOptions(cam_options_) != CAM_SUCCESS)
       return -1;
 
     // if (cam::setAOI(cam_options_) != CAM_SUCCESS)
     //   return -1;
 
-    cam::initBuffers(cam_options_);
 
-    //cam::startVideoCapture(cam_options_);
+
+    cam::startVideoCapture(cam_options_);
   }
   else{
     cv::Mat tmp = cv::imread(sim_options_.image_path);
@@ -216,8 +225,7 @@ int main(int argc, char* argv[]){
   }
 
 //////////////////// Image capture loop ////////////////////
-  cv::Mat image = cv::Mat(cam_options_.imageHeight
-                          ,
+  cv::Mat image = cv::Mat(cam_options_.imageHeight,
                           cam_options_.imageWidth,
                           CV_8UC3);
 
@@ -235,23 +243,16 @@ int main(int argc, char* argv[]){
 //////////////////// Capture the image
   cv::Mat dish;
 
-  int timeoutCounter = 0;
   int captureStatus;
   do{
     if(!simulation){
-      do {
-        ++currentImgIndex %= cam_options_.ringBufferSize;
+      ++currentImgIndex %= cam_options_.ringBufferSize;
 
-        // captureStatus = cam::getImage(cam_options_,
-        //                               IMAGE_TIMEOUT,
-        //                               currentImgIndex);
-
-        is_SetImageMem(cam_options_.camHandle,
-                       cam_options_.imgPtrList[currentImgIndex],
-                       cam_options_.imgIdList[currentImgIndex]);
-
-        is_FreezeVideo(cam_options_.camHandle,
-                       IS_WAIT);
+      int timeoutCounter = 0;
+      do{
+        captureStatus = cam::getImage(cam_options_,
+                                      IMAGE_TIMEOUT,
+                                      currentImgIndex);
 
         switch(captureStatus){
         case IS_SUCCESS:
@@ -288,160 +289,208 @@ int main(int argc, char* argv[]){
                         cam_options_.imgPtrList[currentImgIndex],
                         cam_options_.imgIdList[currentImgIndex],
                         reinterpret_cast<char*>(greyImage.data));
-                        //(char*) greyImage.data);
-        greyImage.data = reinterpret_cast<uchar*>(cam_options_.imgPtrList[currentImgIndex]);
-
-        image = greyImage.clone();
-
-        cv::cvtColor(image,
-                     image,
-                     CV_GRAY2RGB);
+        //(char*) greyImage.data);
+        //greyImage.data = reinterpret_cast<uchar*>(cam_options_.imgPtrList[currentImgIndex]);
 
         captureStatus |= freeBuffer(cam_options_,
                                     currentImgIndex);
 
         if(captureStatus != IS_SUCCESS)
-          cout << "Error copying buffer!" << endl;
+          cout << "Error copying buffer: " << captureStatus << endl;
 #ifdef _VERBOSE_MODE_
         else
-          cout << "Buffer " << currentImgIndex << " copied and released." << endl;
-      }
+          cout << "Buffer " << currentImgIndex << " copied and released.\n";
 #endif // _VERBOSE_MODE_
 
 //////////////////// Undistort the image
 
-      if(cam_options_.undistortImage){
+        if(cam_options_.undistortImage){
+          cv::Mat tmp = greyImage.clone();
 
-        cv::Mat tmp = image.clone();
-
-        cv::undistort(tmp,
-                      image,
-                      cam_options_.cameraMatrix,
-                      cam_options_.distCoeffs);
-      } // undistortImage
-    } // captureStatus == IS_SUCCESS
+          cv::undistort(tmp,
+                        greyImage,
+                        cam_options_.cameraMatrix,
+                        cam_options_.distCoeffs);
+        } // undistortImage
+      } // captureStatus == IS_SUCCESS
 
 //////////////////// No new image received
-    else {
-      cout << "No image received, copying the old one." << endl;
+      else {
+        cout << "No image received, copying the old one." << endl;
 
-      cv::putText(image,
-                  "Image out of date!",
-                  cv::Point(image.cols*.1,
-                            image.rows*.94),
-                  CV_FONT_HERSHEY_PLAIN,
-                  5.0,
-                  RED,
-                  3);
-    } // captureStatus != IS_SUCCESS
+        // cv::putText(image,
+        //             "Image out of date!",
+        //             cv::Point(image.cols*.1,
+        //                       image.rows*.94),
+        //             CV_FONT_HERSHEY_PLAIN,
+        //             5.0,
+        //             RED,
+        //             3);
+      } // captureStatus != IS_SUCCESS
 
-  } // end if simulation
-  else
-  {
-    image = cv::imread(sim_options_.image_path);
-  }
+    } // end if simulation
+    else
+    {
+      greyImage = cv::imread(sim_options_.image_path,
+                             CV_8UC1);
+    }
+    greyImage.copyTo(display);
+    cv::cvtColor(display,
+                 display,
+                 CV_GRAY2RGB);
+
+    cv::Mat processing_image;
+    cv::GaussianBlur(greyImage,
+                     processing_image,
+                     cv::Size(9,9),
+                     0);
+
+    display = 1.5*display;
+    processing_image = 1.5*processing_image;
 
 //////////////////// Template matching
-  cv::Mat templ = imread(template_path_);
-  cv::Rect dish_rectangle;
+    cv::Mat templ = imread(template_path_);
+    cv::Rect dish_rectangle;
 
-  bool found = false;
-  cv::Point match_point = matchDishTemplate(image,
-                                            templ,
-                                            found,
-                                            dish_rectangle,
-                                            CV_TM_CCOEFF,
-                                            true);
+    bool found = false;
+    cv::Point match_point;
+    // cv::Point match_point = matchDishTemplate(display,
+    //                                           templ,
+    //                                           found,
+    //                                           dish_rectangle,
+    //                                           CV_TM_CCOEFF,
+    //                                           true);
 
-  ////////// Crop the dish
-  if (found){
-    cv::Mat croppedReference(image,
-                             dish_rectangle);
-    croppedReference.copyTo(dish);
-  }
-  populateDish(dish,
-               5,
-               0.25);
-  detectLarvae(dish,
-               77);
+//////////////////// Circle detection
+    int high_threshold = improc_options_.cannyMaxThreshold;
 
-  cv::Mat image_copy;
-  image.copyTo(image_copy);
-  cv::rectangle(image_copy,
-                match_point,
-                cv::Point(match_point.x + templ.cols,
-                          match_point.y + templ.rows),
-                RED,
-                2,
-                8,
-                0);
+    std::vector<Vec3f> circles;
+    HoughCircles(processing_image,
+                 circles,
+                 CV_HOUGH_GRADIENT,
+                 1,
+                 1.0,//CELL_WIDTH * 0.0,
+                 high_threshold,
+                 100,
+                 0,
+                 0);
+    cout << "Amount of circles detected: " << circles.size() << endl;
 
-  int cell_size = templ.rows / 2;
+    for (size_t i = 0; i < circles.size(); i++){
+      cv::Point center(cvRound(circles[i][0]),
+                       cvRound(circles[i][1]));
+      int radius = cvRound(circles[i][2]);
+      circle(display,
+             center,
+             3,
+             Scalar(0,255,0),
+             -1,
+             8,
+             0);
+      circle(display,
+             center,
+             radius,
+             Scalar(0,0,255),
+             3,
+             8,
+             0);
+    }
 
-  cv::rectangle(image_copy,
-                dish_rectangle,
-                YELLOW,
-                2,
-                8,
-                0);
+    // cv::Canny(processing_image,
+    //           processing_image,
+    //           high_threshold / 3,
+    //           high_threshold,
+    //           3);
+
+
+    ////////// Crop the dish
+    if (found){
+      cv::Mat croppedReference(display,
+                               dish_rectangle);
+      croppedReference.copyTo(dish);
+
+      populateDish (dish,
+                    5,
+                    0.25);
+      detectLarvae (dish,
+                    77);
+
+      cv:: rectangle (display,
+                      match_point,
+                      cv::Point(match_point.x + templ.cols,
+                                match_point.y + templ.rows),
+                      RED,
+                      2,
+                      8,
+                      0);
+
+      int cell_size = templ. rows / 2;
+
+      cv:: rectangle (display,
+                      dish_rectangle,
+                      YELLOW,
+                      2,
+                      8,
+                      0);
+    }
 
 // FIXXME: Still not sure if these are the proper fps
 //////////////////// FPS display
-  currentTime = Time::now();
-  frameDelta = currentTime - previousTime;
-  previousTime = currentTime;
-  float fps = 1/frameDelta.count();
+    currentTime = Time::now();
+    frameDelta = currentTime - previousTime;
+    previousTime = currentTime;
+    float fps = 1/frameDelta.count();
 
-  std::stringstream fpsDisplay;
-  fpsDisplay << "FPS: " << fps;
+    std::stringstream fpsDisplay;
+    fpsDisplay << "FPS: " << fps;
 
-  cv::putText(image_copy,
-              fpsDisplay.str().c_str(), // stringstream -> string -> c-style string
-              cv::Point(150,50),
-              CV_FONT_HERSHEY_PLAIN,
-              2.0,
-              YELLOW);
+    cv::putText(display,
+                fpsDisplay.str().c_str(), // stringstream -> string -> c-style string
+                cv::Point(150,50),
+                CV_FONT_HERSHEY_PLAIN,
+                2.0,
+                YELLOW);
 // END FIXXME
 
 
 
 //////////////////// Display the image
-  cv::namedWindow(WINDOW_NAME,
-                  CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
-  cv::imshow(WINDOW_NAME,
-             image_copy);
+    cv::namedWindow(WINDOW_NAME,
+                    CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
+    cv::imshow(WINDOW_NAME,
+               display);
 
-  if (found){
-    cv::namedWindow("Dish",
-                    CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
-    cv::imshow("Dish",
-               dish);
-  }
+    if (found){
+      cv::namedWindow("Dish",
+                      CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+      cv::imshow("Dish",
+                 dish);
+    }
 
-}while(cv::waitKey(10) != KEY_ESCAPE);
+  }while(cv::waitKey(10) != KEY_ESCAPE);
 
 //////////////////// Cleanup and exit
 
 //TODO: Return variables
-is_StopLiveVideo(cam_options_.camHandle,
-                 IS_FORCE_VIDEO_STOP);
-is_ClearSequence(cam_options_.camHandle);
+  is_StopLiveVideo(cam_options_.camHandle,
+                   IS_FORCE_VIDEO_STOP);
+  is_ClearSequence(cam_options_.camHandle);
 
 // Free image buffers
-for (int i=0; i < cam_options_.ringBufferSize; i++){
-  is_FreeImageMem(cam_options_.camHandle,
-                  cam_options_.imgPtrList[i],
-                  cam_options_.imgIdList[i]);
-}
-cam_options_.imgPtrList.clear();
-cam_options_.imgIdList.clear();
+  for (int i=0; i < cam_options_.ringBufferSize; i++){
+    is_FreeImageMem(cam_options_.camHandle,
+                    cam_options_.imgPtrList[i],
+                    cam_options_.imgIdList[i]);
+  }
+  cam_options_.imgPtrList.clear();
+  cam_options_.imgIdList.clear();
 
 // Close events, buffers, queues and camera
-is_DisableEvent(cam_options_.camHandle,IS_SET_EVENT_FRAME);
-is_ExitImageQueue(cam_options_.camHandle);
-is_ClearSequence(cam_options_.camHandle);
-is_ExitCamera(cam_options_.camHandle);
-std::cout << "Camera " << cam_options_.camHandle << " closed!" << std::endl;
+  is_DisableEvent(cam_options_.camHandle,IS_SET_EVENT_FRAME);
+  is_ExitImageQueue(cam_options_.camHandle);
+  is_ClearSequence(cam_options_.camHandle);
+  is_ExitCamera(cam_options_.camHandle);
+  std::cout << "Camera " << cam_options_.camHandle << " closed!" << std::endl;
 
-return 0;
+  return 0;
 }

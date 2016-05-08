@@ -164,8 +164,9 @@ void xyPlotter::goHome(void){
 void xyPlotter::setFrameRate(double fps){
   std::ostringstream stringStream;
   stringStream << "M1 " << fps;
-
   send(stringStream.str());
+
+  std::cout << "Set hardware Framerate to " << fps << "fps. Waiting on ok...";
 
   waitOnOk();
 }
@@ -175,6 +176,10 @@ void xyPlotter::setFlashTime(double milliseconds){
   stringStream << "M2 " << milliseconds;
 
   send(stringStream.str());
+
+  std::cout << "Set Flashtime to " << milliseconds << "ms. Waiting on ok...";
+
+  waitOnOk();
 }
 
 void xyPlotter::setLineEnd(std::string line_end){

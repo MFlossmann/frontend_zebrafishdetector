@@ -13,6 +13,11 @@ const int CELL_WIDTH = 60;
 
 using namespace cv;
 
+struct imProcOptions{
+  int cannyMaxThreshold;
+  int centerDetectionThreshold;
+};
+
 //namespace imgproc{
 //Mat createTemplate(Mat ringMatrix);
 

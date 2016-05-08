@@ -173,18 +173,21 @@ int initBuffers(cameraOptions &cam_options){
 
   int startVideoCapture(cameraOptions &cam_options){
 
+    if(cam_options.captureMode == HARDWARE_LIVE){
 // Activate the image queue
-    is_InitImageQueue(cam_options.camHandle,
-                      0); // 0 is the only nMode supported
+      is_InitImageQueue(cam_options.camHandle,
+                        0); // 0 is the only nMode supported
 
 // enable the event that a new image is available
-    is_EnableEvent(cam_options.camHandle,
-                   IS_SET_EVENT_FRAME);
+      // is_EnableEvent(cam_options.camHandle,
+      //                IS_SET_EVENT_FRAME);
+      is_EnableEvent(cam_options.camHandle,
+                     IS_SET_EVENT_EXTTRIG);
 
 // enable video capturing
-    is_CaptureVideo(cam_options.camHandle,
-                    IS_WAIT);
-
+      is_CaptureVideo(cam_options.camHandle,
+                      IS_WAIT);
+    }
   } // startVideoCapture
 
   int getImage(const cameraOptions &cam_options,
@@ -214,7 +217,7 @@ int initBuffers(cameraOptions &cam_options){
 
   int freeBuffer(const cameraOptions &cam_options,
                  int current_buffer){
-    if (cam_options.captureMode == captureModeEnum::HARDWARE_LIVE)
+    if (cam_options.captureMode == HARDWARE_LIVE)
       return is_UnlockSeqBuf(cam_options.camHandle,
                              cam_options.imgIdList[current_buffer],
                              cam_options.imgPtrList[current_buffer]);
