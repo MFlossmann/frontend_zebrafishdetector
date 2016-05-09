@@ -334,19 +334,22 @@ int main(int argc, char* argv[]){
       greyImage = cv::imread(sim_options_.image_path,
                              CV_8UC1);
     }
-    greyImage.copyTo(display);
-    cv::cvtColor(display,
+	cv::Mat processing_image;
+    cv::GaussianBlur(greyImage,
+                     processing_image,
+                     cv::Size(5,5),
+                     0);
+    	
+	double alpha = 3.0;
+	double beta = -15;
+	
+    processing_image = alpha*processing_image + beta;
+
+	processing_image.copyTo(display);
+	cv::cvtColor(display,
                  display,
                  CV_GRAY2RGB);
 
-    cv::Mat processing_image;
-    cv::GaussianBlur(greyImage,
-                     processing_image,
-                     cv::Size(9,9),
-                     0);
-
-    display = 1.5*display;
-    processing_image = 1.5*processing_image;
 
 //////////////////// Template matching
     cv::Mat templ = imread(template_path_);
