@@ -34,8 +34,8 @@ const std::string TEMPLATE_FILE_DEFAULT = "../../rings.png";
 const std::string UNDISTORT_FILE_DEFAULT = "../cfg/camera_data.yml";
 
 const double DEFAULT_FRAMERATE = 1.0;
-const double DEFAULT_EXPOSURE_MS = 4.0;
-const double DEFAULT_FLASH_TIME = 1.0;
+const double DEFAULT_EXPOSURE_MS = 1.0;
+const double DEFAULT_FLASH_TIME = 0.20;
 const int IMAGE_TIMEOUT = 500;
 const int TIMEOUT_COUNTER_MAX = 10;
 
@@ -62,6 +62,22 @@ cam::cameraOptions cam_options_;
 std::string template_path_;
 imProcOptions improc_options_;
 simulationOptions sim_options_;
+bool stay;
+
+int high_threshold = 100;
+double max_radius = CELL_WIDTH * 0.9;
+double min_radius = CELL_WIDTH * 0.4;
+double alpha = 1.0;
+double beta = 30;
+
+int high_threshold_slider, alpha_slider, beta_slider, max_radius_slider, min_radius_slider;
+
+const int high_threshold_max = 255;
+const int max_radius_max = 100;
+const int min_radius_max = 100;
+const int alpha_max = 100;
+const int beta_max = 100;
+
 
 //////////////////// functions
 std::string getBinPath() {
@@ -91,6 +107,7 @@ int parseOptions(int argc, char* argv[]){
     ("help,h", "Produce help message")
     ("config,c", po::value<std::string>(&config_file_path)->default_value(binary_path + CONFIG_FILE_DEFAULT), "Different configuration file.")
     ("image,i", po::value<std::string>(&sim_options_.image_path)->default_value("/null"), "Only use the image instead of the camera")
+    ("stay,s", "Don't initalize the plotter coordinates.")
     ;
 
   // Options that are allowed both on command line and in the config file
@@ -139,6 +156,11 @@ int parseOptions(int argc, char* argv[]){
     return 1;
   }
 
+  if (variable_map.count("stay"))
+    stay = true;
+  else
+    stay = false;
+
   sim_options_.sim_mode = (sim_options_.image_path.compare("/null") != 0);
   if (sim_options_.sim_mode){
     if (sim_options_.image_path[0] != '/')
@@ -167,6 +189,16 @@ void readCalibrationParameters(cv::Mat &cameraMatrix,
   return;
 }
 
+void on_trackbar( int, void*){
+  alpha = (double) (25)*alpha_slider/alpha_max;
+  beta = (double) 100*beta_slider/beta_max;
+
+  max_radius = (double) CELL_WIDTH*max_radius_slider / max_radius_max;
+  min_radius = (double) CELL_WIDTH*min_radius_slider / min_radius_max;
+
+  high_threshold = high_threshold_slider;
+}
+
 int main(int argc, char* argv[]){
   xyPlotter xy_plotter("/dev/ttyUSB0");
 
@@ -178,6 +210,7 @@ int main(int argc, char* argv[]){
 
   bool simulation = sim_options_.sim_mode;
 
+  //cam_options_.captureMode = cam::captureModeEnum::HARDWARE_LIVE;
   cam_options_.captureMode = cam::captureModeEnum::HARDWARE_LIVE;
   cam_options_.flashTime = DEFAULT_FLASH_TIME;
 
@@ -193,9 +226,11 @@ int main(int argc, char* argv[]){
     else
       cerr << "Serial communication initiated." << endl;
 
-    xy_plotter.goHome();
-    xy_plotter.moveAbs(200,
+    if(!stay){
+      xy_plotter.goHome();
+      xy_plotter.moveAbs(200,
                        50);
+    }
 
 // Set arduino controlled pparameters of the image capturing
     xy_plotter.setFrameRate(cam_options_.framerate);
@@ -223,6 +258,42 @@ int main(int argc, char* argv[]){
     cam_options_.imageHeight = tmp.rows;
     cam_options_.imageWidth = tmp.cols;
   }
+
+//////////////////// Define trackbars ////////////////////
+//  std::string img_proc_win_name = "processed image";
+  high_threshold_slider = 55;
+  alpha_slider = 6;
+  beta_slider = 11;
+  max_radius_slider = 63;
+  min_radius_slider = 6;
+
+  namedWindow(WINDOW_NAME,
+              CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
+  createTrackbar("alpha",
+                 WINDOW_NAME,
+                 &alpha_slider,
+                 alpha_max,
+                 on_trackbar);
+  createTrackbar("beta",
+                 WINDOW_NAME,
+                 &beta_slider,
+                 beta_max,
+                 on_trackbar);
+  createTrackbar("High Threshold",
+                 WINDOW_NAME,
+                 &high_threshold_slider,
+                 high_threshold_max,
+                 on_trackbar);
+  createTrackbar("Max Radius",
+                 WINDOW_NAME,
+                 &max_radius_slider,
+                 max_radius_max,
+                 on_trackbar);
+  createTrackbar("Min Radius",
+                 WINDOW_NAME,
+                 &min_radius_slider,
+                 min_radius_max,
+                 on_trackbar);
 
 //////////////////// Image capture loop ////////////////////
   cv::Mat image = cv::Mat(cam_options_.imageHeight,
@@ -335,17 +406,20 @@ int main(int argc, char* argv[]){
                              CV_8UC1);
     }
 	cv::Mat processing_image;
-    cv::GaussianBlur(greyImage,
-                     processing_image,
-                     cv::Size(5,5),
-                     0);
-    	
-	double alpha = 3.0;
-	double beta = -15;
-	
-    processing_image = alpha*processing_image + beta;
+    // cv::GaussianBlur(greyImage,
+    //                  processing_image,
+    //                  cv::Size(7,7),
+    //                  0);
+  cv::medianBlur(greyImage,
+                 processing_image,
+                 5);
 
-	processing_image.copyTo(display);
+//  double alpha = 3.0;
+//  double beta = -30;
+
+  processing_image = alpha*processing_image - beta;
+
+  processing_image.copyTo(display);
 	cv::cvtColor(display,
                  display,
                  CV_GRAY2RGB);
@@ -365,46 +439,34 @@ int main(int argc, char* argv[]){
     //                                           true);
 
 //////////////////// Circle detection
-    int high_threshold = improc_options_.cannyMaxThreshold;
+//    int high_threshold = improc_options_.cannyMaxThreshold;
+//    double max_radius = CELL_WIDTH * 0.9;
+//    double min_radius = CELL_WIDTH * 0.4;
 
     std::vector<Vec3f> circles;
     HoughCircles(processing_image,
                  circles,
                  CV_HOUGH_GRADIENT,
-                 1,
-                 1.0,//CELL_WIDTH * 0.0,
+                 2,
+                 max_radius*0.5,
                  high_threshold,
                  100,
-                 0,
-                 0);
+                 min_radius,
+                 max_radius);
     cout << "Amount of circles detected: " << circles.size() << endl;
 
     for (size_t i = 0; i < circles.size(); i++){
       cv::Point center(cvRound(circles[i][0]),
                        cvRound(circles[i][1]));
       int radius = cvRound(circles[i][2]);
-      circle(display,
-             center,
-             3,
-             Scalar(0,255,0),
-             -1,
-             8,
-             0);
-      circle(display,
-             center,
-             radius,
-             Scalar(0,0,255),
-             3,
-             8,
-             0);
+      circle(display,center, 3, Scalar(0,255,0), -1, 8, 0);
+      circle(display, center, radius, Scalar(0,0,255), 3, 8, 0);
     }
+    circle(display, cv::Point(display.cols * 0.9, display.rows * 0.9),
+           max_radius, cv::Scalar(255,0,0), 3, 8, 0);
 
-    // cv::Canny(processing_image,
-    //           processing_image,
-    //           high_threshold / 3,
-    //           high_threshold,
-    //           3);
-
+    circle(display, cv::Point(display.cols * 0.9, display.rows * 0.9),
+           min_radius, cv::Scalar(255,0,0), 3, 8, 0);
 
     ////////// Crop the dish
     if (found){
@@ -437,7 +499,7 @@ int main(int argc, char* argv[]){
                       0);
     }
 
-// FIXXME: Still not sure if these are the proper fps
+// FIXXME: Kind of sure these are the proper fps
 //////////////////// FPS display
     currentTime = Time::now();
     frameDelta = currentTime - previousTime;
@@ -458,10 +520,14 @@ int main(int argc, char* argv[]){
 
 
 //////////////////// Display the image
-    cv::namedWindow(WINDOW_NAME,
-                    CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
+
     cv::imshow(WINDOW_NAME,
                display);
+
+    cv::namedWindow("Image capture",
+                    CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
+    cv::imshow("Image capture",
+               greyImage);
 
     if (found){
       cv::namedWindow("Dish",
@@ -474,7 +540,7 @@ int main(int argc, char* argv[]){
 
 //////////////////// Cleanup and exit
 
-//TODO: Return variables
+//TODO: Return status of closing
   is_StopLiveVideo(cam_options_.camHandle,
                    IS_FORCE_VIDEO_STOP);
   is_ClearSequence(cam_options_.camHandle);
@@ -494,6 +560,28 @@ int main(int argc, char* argv[]){
   is_ClearSequence(cam_options_.camHandle);
   is_ExitCamera(cam_options_.camHandle);
   std::cout << "Camera " << cam_options_.camHandle << " closed!" << std::endl;
+
+// Save the last image
+  std::ostringstream image_path, date, processed_image_path;
+  time_t t = time(0);
+  struct tm * now = localtime(&t);
+  image_path << "/tmp/"
+             << "zebrafish";
+  date << (now->tm_year + 1900) << '-';
+  if ((now->tm_mon + 1) < 10)
+    date << '0';
+  date <<(now->tm_mon) + 1 << '-';
+  if ((now->tm_mday) < 10)
+    date << '0';
+  date << now->tm_mday << '_'
+       << now->tm_hour << now->tm_min << now->tm_sec;
+  image_path << "/tmp/zebrafish_" << date.str() << ".png";
+  processed_image_path << "/tmp/zebrafish_detected_" << date.str() << ".png";
+  cv::imwrite(image_path.str(),
+              greyImage);
+
+  cv::imwrite(processed_image_path.str(),
+              display);
 
   return 0;
 }
