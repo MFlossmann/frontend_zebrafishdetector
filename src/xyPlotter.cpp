@@ -8,6 +8,7 @@ xyPlotter::xyPlotter(std::string device) : char_size_(xyCharSize::CHAR_SIZE_8),
                                            relative_movement_(false)
 {
   serial_port_ = new SerialPort(device);
+
   serial_port_device_ = device;
 }
 

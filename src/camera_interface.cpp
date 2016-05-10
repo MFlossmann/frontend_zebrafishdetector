@@ -27,7 +27,7 @@ int setOptions(cameraOptions &cam_options){
   int cameraStatus;
 
   // Live mode or single image mode
-  if(cam_options.captureMode == HARDWARE_LIVE)
+  if(cam_options.captureMode == captureModeEnum::HARDWARE_LIVE)
     cameraStatus = is_SetExternalTrigger(cam_options.camHandle,
                                          CAM_TRIGGER_RISING_EDGE); // Triggered by rising signal edge
   else
@@ -173,7 +173,7 @@ int initBuffers(cameraOptions &cam_options){
 
   int startVideoCapture(cameraOptions &cam_options){
 
-    if(cam_options.captureMode == HARDWARE_LIVE){
+    if(cam_options.captureMode == captureModeEnum::HARDWARE_LIVE){
 // Activate the image queue
       is_InitImageQueue(cam_options.camHandle,
                         0); // 0 is the only nMode supported
@@ -187,7 +187,7 @@ int initBuffers(cameraOptions &cam_options){
 // enable video capturing
       is_CaptureVideo(cam_options.camHandle,
                       IS_WAIT);
-    }
+    } // if HARDWARE_LIVE
   } // startVideoCapture
 
   int getImage(const cameraOptions &cam_options,
@@ -217,7 +217,7 @@ int initBuffers(cameraOptions &cam_options){
 
   int freeBuffer(const cameraOptions &cam_options,
                  int current_buffer){
-    if (cam_options.captureMode == HARDWARE_LIVE)
+    if (cam_options.captureMode == captureModeEnum::HARDWARE_LIVE)
       return is_UnlockSeqBuf(cam_options.camHandle,
                              cam_options.imgIdList[current_buffer],
                              cam_options.imgPtrList[current_buffer]);

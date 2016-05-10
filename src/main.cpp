@@ -29,6 +29,13 @@ using std::endl;
 //////////////////// typedefs
 typedef std::chrono::high_resolution_clock Time;
 
+//////////////////// enums
+enum detectionState{
+  DISH_LOCATION,
+  DISH_TEMPLATE,
+  LARVAE_MOVEMENT
+};
+
 //////////////////// consts
 const std::string CONFIG_FILE_DEFAULT = "../cfg/front_end.cfg";
 // FIXXXME: Put into the proper folder!
@@ -237,7 +244,7 @@ cv::Point matToPoint(cv::Mat mat){
           << mat.rows << "x" << mat.cols
           << " to a point. It has to be a 2D vector!";
     throw std::runtime_error(error.str());
-      }
+  }
 
 }
 
@@ -273,7 +280,7 @@ int main(int argc, char* argv[]){
 
   bool simulation = sim_options_.sim_mode;
 
-  //cam_options_.captureMode = cam::captureModeEnum::HARDWARE_LIVE;
+//   cam_options_.captureMode = cam::captureModeEnum::HARDWARE_FREEZE;
   cam_options_.captureMode = cam::captureModeEnum::HARDWARE_LIVE;
   cam_options_.flashTime = DEFAULT_FLASH_TIME;
 
@@ -359,6 +366,8 @@ int main(int argc, char* argv[]){
                  on_trackbar);
 
 //////////////////// Init Image capture loop ////////////////////
+  detectionState detection_state = detectionState::DISH_LOCATION;
+
   cv::Mat image = cv::Mat(cam_options_.imageHeight,
                           cam_options_.imageWidth,
                           CV_8UC3);
@@ -484,7 +493,7 @@ int main(int argc, char* argv[]){
                              CV_8UC1);
     }
 
-//////////////////// Processing the image
+//////////////////////////////////////// Processing the image ////////////////////////////////////////
     cv::Mat processing_image;
     // cv::GaussianBlur(greyImage,
     //                  processing_image,
@@ -494,116 +503,126 @@ int main(int argc, char* argv[]){
                    processing_image,
                    5);
 
-//  double alpha = 3.0;
-//  double beta = -30;
 
-    processing_image = alpha*processing_image - beta;
+    switch (detection_state){
+    case detectionState::DISH_LOCATION:{
+      processing_image = alpha*processing_image - beta;
 
-    processing_image.copyTo(display);
-    cv::cvtColor(display,
-                 display,
-                 CV_GRAY2RGB);
-
-
-//////////////////// Template matching
-    cv::Mat templ = imread(template_path_);
-    cv::Rect dish_rectangle;
-
-    bool found = false;
-    cv::Point match_point;
-    // cv::Point match_point = matchDishTemplate(display,
-    //                                           templ,
-    //                                           found,
-    //                                           dish_rectangle,
-    //                                           CV_TM_CCOEFF,
-    //                                           true);
+      processing_image.copyTo(display);
+      cv::cvtColor(display,
+                   display,
+                   CV_GRAY2RGB);
 
 //////////////////// Circle detection
 //    int high_threshold = improc_options_.cannyMaxThreshold;
 //    double max_radius = CELL_WIDTH * 0.9;
 //    double min_radius = CELL_WIDTH * 0.4;
 
-    std::vector<Vec3f> circles;
-    HoughCircles(processing_image,
-                 circles,
-                 CV_HOUGH_GRADIENT,
-                 2,
-                 max_radius*0.5,
-                 high_threshold,
-                 100,
-                 min_radius,
-                 max_radius);
-    cout << "Amount of circles detected: " << circles.size() << endl;
+      std::vector<Vec3f> circles;
+      HoughCircles(processing_image,
+                   circles,
+                   CV_HOUGH_GRADIENT,
+                   2,
+                   max_radius*0.5,
+                   high_threshold,
+                   100,
+                   min_radius,
+                   max_radius);
+      cout << "Amount of circles detected: " << circles.size() << endl;
 
-    cv::Point center_measurement = cv::Point(0,0);
-    int circles_found = circles.size();
-    for (size_t i = 0; i < circles_found; i++){
-      cv::Point center(cvRound(circles[i][0]),
-                       cvRound(circles[i][1]));
-      int radius = cvRound(circles[i][2]);
-      circle(display, center, 3, Scalar(0,255,0), -1, 8, 0);
-      circle(display, center, radius, Scalar(0,0,255), 3, 8, 0);
+      cv::Point center_measurement = cv::Point(0,0);
+      int circles_found = circles.size();
+      for (size_t i = 0; i < circles_found; i++){
+        cv::Point center(cvRound(circles[i][0]),
+                         cvRound(circles[i][1]));
+        int radius = cvRound(circles[i][2]);
+        circle(display, center, 3, Scalar(0,255,0), -1, 8, 0);
+        circle(display, center, radius, Scalar(0,0,255), 3, 8, 0);
 
-      center_measurement += center * ((double) 1/circles_found);
-    }
-    circle(display, cv::Point(display.cols * 0.9, display.rows * 0.9),
-           max_radius, cv::Scalar(255,0,0), 3, 8, 0);
+        center_measurement += center * ((double) 1/circles_found);
+      }
+      circle(display, cv::Point(display.cols * 0.9, display.rows * 0.9),
+             max_radius, cv::Scalar(255,0,0), 3, 8, 0);
 
-    circle(display, cv::Point(display.cols * 0.9, display.rows * 0.9),
-           min_radius, cv::Scalar(255,0,0), 3, 8, 0);
+      circle(display, cv::Point(display.cols * 0.9, display.rows * 0.9),
+             min_radius, cv::Scalar(255,0,0), 3, 8, 0);
 
 //////////////////// Kalman filter update
-    cv::Mat posterior_mat = kalman_filter.predict(); // FIXXXME: Add control
+      cv::Mat posterior_mat = kalman_filter.predict(); // FIXXXME: Add control
 
-    if(circles_found > MIN_FOUND_CIRCLES)
-      posterior_mat = kalman_filter.correct(pointToMat(center_measurement));
+      if(circles_found > MIN_FOUND_CIRCLES)
+        posterior_mat = kalman_filter.correct(pointToMat(center_measurement));
 
-    cv::Point posterior = matToPoint(posterior_mat);
+      cv::Point posterior = matToPoint(posterior_mat);
 
-    // display the dish posterior
-    circle(display,
-           posterior,
-           5,
-           cv::Scalar(0,0xFF,0xFF),
-           -1);
-
+      // display the dish posterior
+      circle(display,
+             posterior,
+             5,
+             cv::Scalar(0,0xFF,0xFF),
+             -1);
 
 //////////////////// Move the camera to center the dish
-    // xy_plotter.moveRel((double) (posterior.x - image_center.x)/5.0,
-    //                    (double) (posterior.y - image_center.y)/5.0);
+      double diff_x = (double) posterior.x - image_center.x;
+      double diff_y = (double) posterior.y - image_center.y;
+      cout << "Moving relatively: " << endl << "\t"
+           << posterior.x << "-" << image_center.x << ","
+           << posterior.y << "-" << image_center.y << " = ("
+           << diff_x << ","
+           << diff_y << ")" << endl;
+      // xy_plotter.moveRel(diff_x / 50.0,
+      //                    diff_y / 50.0);
 
+      if (abs(diff_x) < 50 && abs(diff_y) < 50)
+        detection_state = detectionState::DISH_TEMPLATE;
+    }
+      break;
+    case detectionState::DISH_TEMPLATE:{
+      //////////////////// Template matching ////////////////////
+      cv::Mat templ = imread(template_path_);
+      cv::Rect dish_rectangle;
+
+      bool found = false;
+      cv::Point match_point = matchDishTemplate(display,
+                                                templ,
+                                                found,
+                                                dish_rectangle,
+                                                CV_TM_CCOEFF,
+                                                true);
 
       ////////// Crop the dish
-      if (found){
-        cv::Mat croppedReference(display,
-                                 dish_rectangle);
-        croppedReference.copyTo(dish);
+      cv::Mat croppedReference(display,
+                               dish_rectangle);
+      croppedReference.copyTo(dish);
 
-        populateDish (dish,
-                      5,
-                      0.25);
-        detectLarvae (dish,
-                      77);
+      populateDish (dish,
+                    5,
+                    0.25);
+      detectLarvae (dish,
+                    77);
 
-        cv:: rectangle (display,
-                        match_point,
-                        cv::Point(match_point.x + templ.cols,
-                                  match_point.y + templ.rows),
-                        RED,
-                        2,
-                        8,
-                        0);
+      cv:: rectangle (display,
+                      match_point,
+                      cv::Point(match_point.x + templ.cols,
+                                match_point.y + templ.rows),
+                      RED,
+                      2,
+                      8,
+                      0);
 
-        int cell_size = templ. rows / 2;
+      int cell_size = templ. rows / 2;
 
-        cv:: rectangle (display,
-                        dish_rectangle,
-                        YELLOW,
-                        2,
-                        8,
-                        0);
-      }
-
+      cv:: rectangle (display,
+                      dish_rectangle,
+                      YELLOW,
+                      2,
+                      8,
+                      0);
+    }
+      break;
+    case detectionState::LARVAE_MOVEMENT:
+      break;
+    }
 // FIXXME: Kind of sure these are the proper fps
 //////////////////// FPS display
     currentTime = Time::now();
@@ -622,9 +641,7 @@ int main(int argc, char* argv[]){
                 YELLOW);
 // END FIXXME
 
-
-
-//////////////////// Display the image
+//////////////////// Display the image ////////////////////
 
     cv::imshow(WINDOW_NAME,
                display);
@@ -634,13 +651,12 @@ int main(int argc, char* argv[]){
     cv::imshow("Image capture",
                greyImage);
 
-    if (found){
-      cv::namedWindow("Dish",
-                      CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
-      cv::imshow("Dish",
-                 dish);
-    }
-
+    // if (found){
+    //   cv::namedWindow("Dish",
+    //                   CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+    //   cv::imshow("Dish",
+    //              dish);
+    // }
   }while(cv::waitKey(10) != KEY_ESCAPE);
 
 //////////////////// Cleanup and exit
