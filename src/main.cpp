@@ -9,6 +9,9 @@
 #include <chrono>
 #include <unistd.h>
 
+#include <mutex>
+#include <thread>
+
 //#include <opencv/cv.hpp>
 #include "camera_interface.hpp"
 #include "image_processing.hpp"
@@ -34,6 +37,14 @@ enum detectionState{
   DISH_LOCATION,
   DISH_TEMPLATE,
   LARVAE_MOVEMENT
+};
+
+//////////////////// structs
+struct xyPlotterPipe{
+  std::mutex standing_still_mutex; // default: unlocked
+  std::mutex goal_available_mutex; // default: locked
+  std::mutex close_enough_mutex;   // default: locked
+  cv::Point_<double> goal;
 };
 
 //////////////////// consts
@@ -248,12 +259,35 @@ cv::Point matToPoint(cv::Mat mat){
 
 }
 
+void xyPlotterMove(xyPlotter *xy_plotter,
+                   xyPlotterPipe *xy_plotter_pipe){
+// FIXXXXME: wil never terminate just now
+  while(true)
+  {
+    xy_plotter_pipe->goal_available_mutex.lock();
+
+// thread can finish if close enough
+    if( xy_plotter_pipe->close_enough_mutex.try_lock() ){
+      // unlock all the mutexes to signal that the thread is finished
+      xy_plotter_pipe->standing_still_mutex.unlock();
+      xy_plotter_pipe->close_enough_mutex.unlock();
+
+      break;
+    }
+
+    xy_plotter->moveRel(xy_plotter_pipe->goal.x,
+                        xy_plotter_pipe->goal.y);
+    xy_plotter_pipe->standing_still_mutex.unlock();
+  }
+}
+
 int main(int argc, char* argv[]){
 // return if --help option was called
   if (parseOptions(argc, argv))
     return 1;
 
   xyPlotter xy_plotter("/dev/ttyUSB0");
+  xyPlotterPipe xy_plotter_pipe;
 
   cv::Mat display;
 
@@ -364,6 +398,10 @@ int main(int argc, char* argv[]){
                  &min_radius_slider,
                  min_radius_max,
                  on_trackbar);
+
+//////////////////// FIXXXXXME: here comes the thread initialization
+//////////////////// FIXXXXXME: Don't forget the mutex init!!!
+
 
 //////////////////// Init Image capture loop ////////////////////
   detectionState detection_state = detectionState::DISH_LOCATION;
@@ -549,11 +587,37 @@ int main(int argc, char* argv[]){
 
 //////////////////// Kalman filter update
       cv::Mat posterior_mat = kalman_filter.predict(); // FIXXXME: Add control
-
-      if(circles_found > MIN_FOUND_CIRCLES)
-        posterior_mat = kalman_filter.correct(pointToMat(center_measurement));
-
       cv::Point posterior = matToPoint(posterior_mat);
+
+      // Kalman filter correction
+      if(circles_found > MIN_FOUND_CIRCLES){
+
+      // only correct the Kalman filter if the XY_Plotter is standing still
+        if( xy_plotter_pipe.standing_still_mutex.try_lock() )
+        {
+          posterior_mat = kalman_filter.correct(pointToMat(center_measurement));
+
+//////////////////// Move the camera to center the dish
+          posterior = matToPoint(posterior_mat);
+
+          double diff_x = (double) posterior.x - image_center.x;
+          double diff_y = (double) posterior.y - image_center.y;
+          cout << "Moving relatively: " << endl << "\t"
+               << posterior.x << "-" << image_center.x << ","
+               << posterior.y << "-" << image_center.y << " = ("
+               << diff_x << ","
+               << diff_y << ")" << endl;
+
+          if (abs(diff_x) < 50 && abs(diff_y) < 50){
+            xy_plotter_pipe.close_enough_mutex.unlock();
+//             detection_state = detectionState::DISH_TEMPLATE;
+          }
+
+          xy_plotter_pipe.goal = cv::Point_<double>(diff_x,
+                                                    diff_y);
+          xy_plotter_pipe.goal_available_mutex.unlock();
+        }
+      }
 
       // display the dish posterior
       circle(display,
