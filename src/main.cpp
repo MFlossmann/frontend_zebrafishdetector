@@ -13,6 +13,8 @@
 #include "camera_interface.hpp"
 #include "image_processing.hpp"
 
+#include "opencv2/video/tracking.hpp"
+
 #include "xyPlotter.hpp"
 
 #include <boost/program_options.hpp>
@@ -50,6 +52,8 @@ const cv::Scalar RED = cv::Scalar(0,0,0xFF);
 const int KEY_ESCAPE = 27;
 
 const xyBaudRate BAUD_RATE = xyBaudRate::BAUD_115200;
+
+const int MIN_FOUND_CIRCLES = 3;
 
 //////////////////// structs
 struct simulationOptions{
@@ -199,14 +203,73 @@ void on_trackbar( int, void*){
   high_threshold = high_threshold_slider;
 }
 
+std::vector<int> pointToVector(cv::Point point){
+  std::vector<int> result(2);
+
+  result[0] = point.x;
+  result[1] = point.y;
+
+  return result;
+}
+
+// FIXXME: Might be incompatible to ints
+cv::Mat pointToMat(cv::Point point){
+  cv::Mat result(2,1,CV_32F);
+
+  result.at<float>(0) = point.x;
+  result.at<float>(1) = point.y;
+  return result;
+}
+
+cv::Point matToPoint(cv::Mat mat){
+  // First: transpose possible row vectors
+  if (mat.cols == 2 && mat.rows == 1)
+    cv::transpose(mat,mat);
+
+  if (mat.cols == 1 && mat.rows == 2){
+    return cv::Point((int) mat.at<float>(0,0),
+                     (int) mat.at<float>(0,1));
+  }
+  else{
+    std::stringstream error;
+
+    error << "Can't convert a matrix of dimension"
+          << mat.rows << "x" << mat.cols
+          << " to a point. It has to be a 2D vector!";
+    throw std::runtime_error(error.str());
+      }
+
+}
+
 int main(int argc, char* argv[]){
+// return if --help option was called
+  if (parseOptions(argc, argv))
+    return 1;
+
   xyPlotter xy_plotter("/dev/ttyUSB0");
 
   cv::Mat display;
 
-// return if --help option was called
-  if (parseOptions(argc, argv))
-    return 1;
+//////////////////// Initialize Kalman filter
+  KalmanFilter kalman_filter(2,2,2);
+  // \bar{\mathbf{x}}_k = A*\mathbf{x}_{k-1} + B*\mathbf{u}_k + \mathbf{w}_k
+  // Transition Matrix A
+  cv::setIdentity(kalman_filter.transitionMatrix);
+  // Control Matrix B
+  cv::setIdentity(kalman_filter.controlMatrix);
+  // Process noise vector w ~ N(Process noise covariance Matrix Q)
+  cv::setIdentity(kalman_filter.processNoiseCov,
+                  Scalar::all(1e-1));
+
+  // \mathbf{z}_k=H*\mathbf{x}_k + \mathbf{v}_k
+  // Matrix H
+  cv::setIdentity(kalman_filter.measurementMatrix);
+  // Vector v ~ N(measurement Noise covariance R_k)
+  cv::setIdentity(kalman_filter.measurementNoiseCov,
+                  Scalar::all(1e-3));
+
+  cv::setIdentity(kalman_filter.errorCovPost,
+                  Scalar::all(1));
 
   bool simulation = sim_options_.sim_mode;
 
@@ -228,8 +291,8 @@ int main(int argc, char* argv[]){
 
     if(!stay){
       xy_plotter.goHome();
-      xy_plotter.moveAbs(200,
-                       50);
+      xy_plotter.moveAbs(150,
+                         150);
     }
 
 // Set arduino controlled pparameters of the image capturing
@@ -295,15 +358,30 @@ int main(int argc, char* argv[]){
                  min_radius_max,
                  on_trackbar);
 
-//////////////////// Image capture loop ////////////////////
+//////////////////// Init Image capture loop ////////////////////
   cv::Mat image = cv::Mat(cam_options_.imageHeight,
                           cam_options_.imageWidth,
                           CV_8UC3);
 
-  cv::Mat greyImage = cv::Mat(cam_options_.aoiHeight,
+  cv::Mat greyImage = cv::Mat(cam_options_.imageHeight,
                               cam_options_.imageWidth,
                               CV_8UC1);
 
+  // init Kalman posterior belief
+  cv::Point image_center(cam_options_.imageWidth/2,
+                         cam_options_.imageHeight/2);
+
+  randn(kalman_filter.statePost,
+        cv::Scalar(image_center.x,
+                   image_center.y),
+        cv::Scalar(image_center.x/2,
+                   image_center.y/2));
+
+  // randn(kalman_filter.statePost,
+  //       cv::Scalar(cam_options_.imageWidth/2,
+  //                  cam_options_.imageHeight/2),
+  //       cv::Scalar(cam_options_.imageWidth/4,
+  //                  cam_options_.imageHeight/4));
 
   std::chrono::duration<float> frameDelta;
   auto currentTime = Time::now(),
@@ -311,10 +389,10 @@ int main(int argc, char* argv[]){
 
   int currentImgIndex = -1;
 
-//////////////////// Capture the image
   cv::Mat dish;
 
   int captureStatus;
+//////////////////// Image loop
   do{
     if(!simulation){
       ++currentImgIndex %= cam_options_.ringBufferSize;
@@ -405,22 +483,24 @@ int main(int argc, char* argv[]){
       greyImage = cv::imread(sim_options_.image_path,
                              CV_8UC1);
     }
-	cv::Mat processing_image;
+
+//////////////////// Processing the image
+    cv::Mat processing_image;
     // cv::GaussianBlur(greyImage,
     //                  processing_image,
     //                  cv::Size(7,7),
     //                  0);
-  cv::medianBlur(greyImage,
-                 processing_image,
-                 5);
+    cv::medianBlur(greyImage,
+                   processing_image,
+                   5);
 
 //  double alpha = 3.0;
 //  double beta = -30;
 
-  processing_image = alpha*processing_image - beta;
+    processing_image = alpha*processing_image - beta;
 
-  processing_image.copyTo(display);
-	cv::cvtColor(display,
+    processing_image.copyTo(display);
+    cv::cvtColor(display,
                  display,
                  CV_GRAY2RGB);
 
@@ -455,12 +535,16 @@ int main(int argc, char* argv[]){
                  max_radius);
     cout << "Amount of circles detected: " << circles.size() << endl;
 
-    for (size_t i = 0; i < circles.size(); i++){
+    cv::Point center_measurement = cv::Point(0,0);
+    int circles_found = circles.size();
+    for (size_t i = 0; i < circles_found; i++){
       cv::Point center(cvRound(circles[i][0]),
                        cvRound(circles[i][1]));
       int radius = cvRound(circles[i][2]);
-      circle(display,center, 3, Scalar(0,255,0), -1, 8, 0);
+      circle(display, center, 3, Scalar(0,255,0), -1, 8, 0);
       circle(display, center, radius, Scalar(0,0,255), 3, 8, 0);
+
+      center_measurement += center * ((double) 1/circles_found);
     }
     circle(display, cv::Point(display.cols * 0.9, display.rows * 0.9),
            max_radius, cv::Scalar(255,0,0), 3, 8, 0);
@@ -468,36 +552,57 @@ int main(int argc, char* argv[]){
     circle(display, cv::Point(display.cols * 0.9, display.rows * 0.9),
            min_radius, cv::Scalar(255,0,0), 3, 8, 0);
 
-    ////////// Crop the dish
-    if (found){
-      cv::Mat croppedReference(display,
-                               dish_rectangle);
-      croppedReference.copyTo(dish);
+//////////////////// Kalman filter update
+    cv::Mat posterior_mat = kalman_filter.predict(); // FIXXXME: Add control
 
-      populateDish (dish,
-                    5,
-                    0.25);
-      detectLarvae (dish,
-                    77);
+    if(circles_found > MIN_FOUND_CIRCLES)
+      posterior_mat = kalman_filter.correct(pointToMat(center_measurement));
 
-      cv:: rectangle (display,
-                      match_point,
-                      cv::Point(match_point.x + templ.cols,
-                                match_point.y + templ.rows),
-                      RED,
-                      2,
-                      8,
-                      0);
+    cv::Point posterior = matToPoint(posterior_mat);
 
-      int cell_size = templ. rows / 2;
+    // display the dish posterior
+    circle(display,
+           posterior,
+           5,
+           cv::Scalar(0,0xFF,0xFF),
+           -1);
 
-      cv:: rectangle (display,
-                      dish_rectangle,
-                      YELLOW,
-                      2,
-                      8,
-                      0);
-    }
+
+//////////////////// Move the camera to center the dish
+    // xy_plotter.moveRel((double) (posterior.x - image_center.x)/5.0,
+    //                    (double) (posterior.y - image_center.y)/5.0);
+
+
+      ////////// Crop the dish
+      if (found){
+        cv::Mat croppedReference(display,
+                                 dish_rectangle);
+        croppedReference.copyTo(dish);
+
+        populateDish (dish,
+                      5,
+                      0.25);
+        detectLarvae (dish,
+                      77);
+
+        cv:: rectangle (display,
+                        match_point,
+                        cv::Point(match_point.x + templ.cols,
+                                  match_point.y + templ.rows),
+                        RED,
+                        2,
+                        8,
+                        0);
+
+        int cell_size = templ. rows / 2;
+
+        cv:: rectangle (display,
+                        dish_rectangle,
+                        YELLOW,
+                        2,
+                        8,
+                        0);
+      }
 
 // FIXXME: Kind of sure these are the proper fps
 //////////////////// FPS display
