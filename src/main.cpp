@@ -70,6 +70,7 @@ const cv::Scalar RED = cv::Scalar(0,0,0xFF);
 const int KEY_ESCAPE = 27;
 
 const xyBaudRate BAUD_RATE = xyBaudRate::BAUD_115200;
+const double MM_PER_PIXEL_MOVEMENT = 0.1;
 
 const int MIN_FOUND_CIRCLES = 3;
 
@@ -259,26 +260,28 @@ cv::Point matToPoint(cv::Mat mat){
 
 }
 
-void xyPlotterMove(xyPlotter *xy_plotter,
-                   xyPlotterPipe *xy_plotter_pipe){
-// FIXXXXME: wil never terminate just now
+void xyPlotterMove(xyPlotter &xy_plotter,
+                   xyPlotterPipe &xy_plotter_pipe){
   while(true)
   {
-    xy_plotter_pipe->goal_available_mutex.lock();
+    xy_plotter_pipe.goal_available_mutex.lock();
+    cout << "\tGoal available!\n";
 
 // thread can finish if close enough
-    if( xy_plotter_pipe->close_enough_mutex.try_lock() ){
+    if( xy_plotter_pipe.close_enough_mutex.try_lock() ){
       // unlock all the mutexes to signal that the thread is finished
-      xy_plotter_pipe->standing_still_mutex.unlock();
-      xy_plotter_pipe->close_enough_mutex.unlock();
+      xy_plotter_pipe.standing_still_mutex.unlock();
+      xy_plotter_pipe.close_enough_mutex.unlock();
 
       break;
     }
 
-    xy_plotter->moveRel(xy_plotter_pipe->goal.x,
-                        xy_plotter_pipe->goal.y);
-    xy_plotter_pipe->standing_still_mutex.unlock();
+    xy_plotter.moveRel(xy_plotter_pipe.goal.x,
+                        xy_plotter_pipe.goal.y);
+    xy_plotter_pipe.standing_still_mutex.unlock();
   }
+
+  return;
 }
 
 int main(int argc, char* argv[]){
@@ -308,6 +311,7 @@ int main(int argc, char* argv[]){
   // Vector v ~ N(measurement Noise covariance R_k)
   cv::setIdentity(kalman_filter.measurementNoiseCov,
                   Scalar::all(1e-3));
+  kalman_filter.measurementNoiseCov.at<float>(0,0) = 2e-3;
 
   cv::setIdentity(kalman_filter.errorCovPost,
                   Scalar::all(1));
@@ -400,8 +404,13 @@ int main(int argc, char* argv[]){
                  on_trackbar);
 
 //////////////////// FIXXXXXME: here comes the thread initialization
-//////////////////// FIXXXXXME: Don't forget the mutex init!!!
-
+  cout << "Starting the xyPlotter moving thread...";
+  std::thread xy_plotter_move(xyPlotterMove,
+                              std::ref(xy_plotter),
+                              std::ref(xy_plotter_pipe));
+  xy_plotter_pipe.standing_still_mutex.unlock();
+  xy_plotter_pipe.goal_available_mutex.lock();
+  xy_plotter_pipe.close_enough_mutex.lock();
 
 //////////////////// Init Image capture loop ////////////////////
   detectionState detection_state = detectionState::DISH_LOCATION;
@@ -421,14 +430,9 @@ int main(int argc, char* argv[]){
   randn(kalman_filter.statePost,
         cv::Scalar(image_center.x,
                    image_center.y),
-        cv::Scalar(image_center.x/2,
-                   image_center.y/2));
-
-  // randn(kalman_filter.statePost,
-  //       cv::Scalar(cam_options_.imageWidth/2,
-  //                  cam_options_.imageHeight/2),
-  //       cv::Scalar(cam_options_.imageWidth/4,
-  //                  cam_options_.imageHeight/4));
+        cv::Scalar::all(0));
+        // cv::Scalar(image_center.x/2,
+        //            image_center.y/2));
 
   std::chrono::duration<float> frameDelta;
   auto currentTime = Time::now(),
@@ -601,20 +605,23 @@ int main(int argc, char* argv[]){
           posterior = matToPoint(posterior_mat);
 
           double diff_x = (double) posterior.x - image_center.x;
-          double diff_y = (double) posterior.y - image_center.y;
+          // different sign, because opencv counts from the upper right corner
+          double diff_y = (double) image_center.y - posterior.y;
           cout << "Moving relatively: " << endl << "\t"
                << posterior.x << "-" << image_center.x << ","
                << posterior.y << "-" << image_center.y << " = ("
                << diff_x << ","
                << diff_y << ")" << endl;
 
-          if (abs(diff_x) < 50 && abs(diff_y) < 50){
+          if (abs(diff_x) < 20 && abs(diff_y) < 20){
+            cout << "\tClose enough! Shutting down the mover...\n";
             xy_plotter_pipe.close_enough_mutex.unlock();
 //             detection_state = detectionState::DISH_TEMPLATE;
           }
 
-          xy_plotter_pipe.goal = cv::Point_<double>(diff_x,
-                                                    diff_y);
+          xy_plotter_pipe.goal = cv::Point_<double>(diff_x * MM_PER_PIXEL_MOVEMENT,
+                                                    diff_y * MM_PER_PIXEL_MOVEMENT);
+          cout << "Unlocking the mover...\n";
           xy_plotter_pipe.goal_available_mutex.unlock();
         }
       }
@@ -625,20 +632,6 @@ int main(int argc, char* argv[]){
              5,
              cv::Scalar(0,0xFF,0xFF),
              -1);
-
-//////////////////// Move the camera to center the dish
-      double diff_x = (double) posterior.x - image_center.x;
-      double diff_y = (double) posterior.y - image_center.y;
-      cout << "Moving relatively: " << endl << "\t"
-           << posterior.x << "-" << image_center.x << ","
-           << posterior.y << "-" << image_center.y << " = ("
-           << diff_x << ","
-           << diff_y << ")" << endl;
-      // xy_plotter.moveRel(diff_x / 50.0,
-      //                    diff_y / 50.0);
-
-      if (abs(diff_x) < 50 && abs(diff_y) < 50)
-        detection_state = detectionState::DISH_TEMPLATE;
     }
       break;
     case detectionState::DISH_TEMPLATE:{
@@ -724,6 +717,9 @@ int main(int argc, char* argv[]){
   }while(cv::waitKey(10) != KEY_ESCAPE);
 
 //////////////////// Cleanup and exit
+
+// Clean up the thread
+  xy_plotter_move.join();
 
 //TODO: Return status of closing
   is_StopLiveVideo(cam_options_.camHandle,
