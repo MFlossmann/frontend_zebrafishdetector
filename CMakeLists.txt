@@ -10,7 +10,7 @@ set( 64BIT "x86_64")
 
 # For preprocessor flags
 #add_definitions( -D_GREYSCALE_IMAGE_ )
-add_definitions( -D_VERBOSE_MODE_ )
+#add_definitions( -D_VERBOSE_MODE_ )
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)

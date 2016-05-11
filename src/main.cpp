@@ -36,6 +36,7 @@ typedef std::chrono::high_resolution_clock Time;
 enum detectionState{
   DISH_LOCATION,
   DISH_TEMPLATE,
+  DISH_OBB,
   LARVAE_MOVEMENT
 };
 
@@ -50,7 +51,7 @@ struct xyPlotterPipe{
 //////////////////// consts
 const std::string CONFIG_FILE_DEFAULT = "../cfg/front_end.cfg";
 // FIXXXME: Put into the proper folder!
-const std::string TEMPLATE_FILE_DEFAULT = "../../rings.png";
+const std::string TEMPLATE_FILE_DEFAULT = "../../pictures/template01.png";
 const std::string UNDISTORT_FILE_DEFAULT = "../cfg/camera_data.yml";
 
 const double DEFAULT_FRAMERATE = 1.0;
@@ -70,9 +71,21 @@ const cv::Scalar RED = cv::Scalar(0,0,0xFF);
 const int KEY_ESCAPE = 27;
 
 const xyBaudRate BAUD_RATE = xyBaudRate::BAUD_115200;
+
 const double MM_PER_PIXEL_MOVEMENT = 0.1;
+const float CONFIDENCE_MIN = 1500; // Empirical
+//const float CONFIDENCE_MIN = 9.210; // 1%  χ_2 distribution
+//const float CONFIDENCE_MIN = 5.991; // 5%
+//const float CONFIDENCE_MIN = 4.605; // 10%
+//const float CONFIDENCE_MIN = 3.22; // 20%
+//const float CONFIDENCE_MIN = 0.211; // 90%
+
+const int CONFIDENCE_COUNTER_MIN = 4; // How long for the center to be in the sweet spot
+const int OBB_COUNTER_MIN = 8; // How long to look for the OBB
 
 const int MIN_FOUND_CIRCLES = 3;
+
+const int CENTER_BUFFER_SIZE = 3*24;
 
 //////////////////// structs
 struct simulationOptions{
@@ -90,7 +103,7 @@ bool stay;
 int high_threshold = 100;
 double max_radius = CELL_WIDTH * 0.9;
 double min_radius = CELL_WIDTH * 0.4;
-double alpha = 1.0;
+double alpha = 2.5;
 double beta = 30;
 
 int high_threshold_slider, alpha_slider, beta_slider, max_radius_slider, min_radius_slider;
@@ -220,6 +233,12 @@ void on_trackbar( int, void*){
   min_radius = (double) CELL_WIDTH*min_radius_slider / min_radius_max;
 
   high_threshold = high_threshold_slider;
+
+  cout << "\tα =\t" << alpha << endl
+       << "\tβ =\t" << beta << endl
+       << "\tmax_r =\t" << max_radius << endl
+       << "\tmin_r =\t" << min_radius << endl
+       << "threshold =\t" << high_threshold << endl;
 }
 
 std::vector<int> pointToVector(cv::Point point){
@@ -284,6 +303,45 @@ void xyPlotterMove(xyPlotter &xy_plotter,
   return;
 }
 
+
+std::vector<Vec3f> findDrawCircles(cv::Mat &processing_image,
+                                   cv::Mat &display,
+                                   int &circles_found,
+                                   cv::Point *center_measurement = 0,
+                                   bool draw_radius=false){
+  std::vector<Vec3f> circles;
+  HoughCircles(processing_image,
+               circles,
+               CV_HOUGH_GRADIENT,
+               2,
+               max_radius*0.5,
+               high_threshold,
+               100,
+               min_radius,
+               max_radius);
+  cout << "Amount of circles detected: " << circles.size() << endl;
+
+  if (center_measurement != 0)
+    *center_measurement = cv::Point(0,0);
+
+  circles_found = circles.size();
+  for (size_t i = 0; i < circles_found; i++){
+    cv::Point center(cvRound(circles[i][0]),
+                     cvRound(circles[i][1]));
+    int radius = cvRound(circles[i][2]);
+
+    circle(display, center, 3, Scalar(0,255,0), -1, 8, 0);
+
+    if (draw_radius)
+    circle(display, center, radius, Scalar(0,0,255), 3, 8, 0);
+
+    if (center_measurement != 0)
+      *center_measurement += center * ((double) 1/circles_found);
+  }
+
+  return circles;
+}
+
 int main(int argc, char* argv[]){
 // return if --help option was called
   if (parseOptions(argc, argv))
@@ -307,11 +365,14 @@ int main(int argc, char* argv[]){
 
   // \mathbf{z}_k=H*\mathbf{x}_k + \mathbf{v}_k
   // Matrix H
-  cv::setIdentity(kalman_filter.measurementMatrix);
+  cv::setIdentity(kalman_filter.measurementMatrix,
+                  Scalar::all(1.0));
   // Vector v ~ N(measurement Noise covariance R_k)
   cv::setIdentity(kalman_filter.measurementNoiseCov,
-                  Scalar::all(1e-3));
-  kalman_filter.measurementNoiseCov.at<float>(0,0) = 2e-3;
+                  Scalar::all(0));
+  kalman_filter.measurementNoiseCov.at<float>(0,0) = 6e-1;
+  kalman_filter.measurementNoiseCov.at<float>(1,1) = 4e-1;
+  cv::Mat kalman_R = kalman_filter.measurementNoiseCov;
 
   cv::setIdentity(kalman_filter.errorCovPost,
                   Scalar::all(1));
@@ -370,7 +431,7 @@ int main(int argc, char* argv[]){
 //////////////////// Define trackbars ////////////////////
 //  std::string img_proc_win_name = "processed image";
   high_threshold_slider = 55;
-  alpha_slider = 6;
+  alpha_slider = 8;
   beta_slider = 11;
   max_radius_slider = 63;
   min_radius_slider = 6;
@@ -414,6 +475,11 @@ int main(int argc, char* argv[]){
 
 //////////////////// Init Image capture loop ////////////////////
   detectionState detection_state = detectionState::DISH_LOCATION;
+  int confidence_counter = 0;
+  int obb_counter = 0;
+
+  // basically a FIFO buffer for the center points
+  std::vector<cv::Point> cell_center_buffer;
 
   cv::Mat image = cv::Mat(cam_options_.imageHeight,
                           cam_options_.imageWidth,
@@ -434,6 +500,10 @@ int main(int argc, char* argv[]){
         // cv::Scalar(image_center.x/2,
         //            image_center.y/2));
 
+  // initialize the posterior_mat
+  cv::Mat posterior_mat = kalman_filter.predict();
+
+// FPS calculation
   std::chrono::duration<float> frameDelta;
   auto currentTime = Time::now(),
     previousTime=Time::now();
@@ -537,52 +607,31 @@ int main(int argc, char* argv[]){
 
 //////////////////////////////////////// Processing the image ////////////////////////////////////////
     cv::Mat processing_image;
-    // cv::GaussianBlur(greyImage,
-    //                  processing_image,
-    //                  cv::Size(7,7),
-    //                  0);
     cv::medianBlur(greyImage,
                    processing_image,
                    5);
+
+    processing_image.copyTo(display);
+    cv::cvtColor(display,
+                 display,
+                 CV_GRAY2RGB);
 
 
     switch (detection_state){
     case detectionState::DISH_LOCATION:{
       processing_image = alpha*processing_image - beta;
 
-      processing_image.copyTo(display);
-      cv::cvtColor(display,
-                   display,
-                   CV_GRAY2RGB);
-
 //////////////////// Circle detection
-//    int high_threshold = improc_options_.cannyMaxThreshold;
-//    double max_radius = CELL_WIDTH * 0.9;
-//    double min_radius = CELL_WIDTH * 0.4;
-
       std::vector<Vec3f> circles;
-      HoughCircles(processing_image,
-                   circles,
-                   CV_HOUGH_GRADIENT,
-                   2,
-                   max_radius*0.5,
-                   high_threshold,
-                   100,
-                   min_radius,
-                   max_radius);
-      cout << "Amount of circles detected: " << circles.size() << endl;
+      cv::Point center_measurement;
+      int circles_found;
 
-      cv::Point center_measurement = cv::Point(0,0);
-      int circles_found = circles.size();
-      for (size_t i = 0; i < circles_found; i++){
-        cv::Point center(cvRound(circles[i][0]),
-                         cvRound(circles[i][1]));
-        int radius = cvRound(circles[i][2]);
-        circle(display, center, 3, Scalar(0,255,0), -1, 8, 0);
-        circle(display, center, radius, Scalar(0,0,255), 3, 8, 0);
+      circles = findDrawCircles(processing_image,
+                                display,
+                                circles_found,
+                                &center_measurement,
+                                true);
 
-        center_measurement += center * ((double) 1/circles_found);
-      }
       circle(display, cv::Point(display.cols * 0.9, display.rows * 0.9),
              max_radius, cv::Scalar(255,0,0), 3, 8, 0);
 
@@ -590,7 +639,7 @@ int main(int argc, char* argv[]){
              min_radius, cv::Scalar(255,0,0), 3, 8, 0);
 
 //////////////////// Kalman filter update
-      cv::Mat posterior_mat = kalman_filter.predict(); // FIXXXME: Add control
+
       cv::Point posterior = matToPoint(posterior_mat);
 
       // Kalman filter correction
@@ -601,9 +650,9 @@ int main(int argc, char* argv[]){
         {
           posterior_mat = kalman_filter.correct(pointToMat(center_measurement));
 
-//////////////////// Move the camera to center the dish
-          posterior = matToPoint(posterior_mat);
+          posterior = matToPoint(kalman_filter.statePost);
 
+//////////////////// Move the camera to center the dish
           double diff_x = (double) posterior.x - image_center.x;
           // different sign, because opencv counts from the upper right corner
           double diff_y = (double) image_center.y - posterior.y;
@@ -613,17 +662,31 @@ int main(int argc, char* argv[]){
                << diff_x << ","
                << diff_y << ")" << endl;
 
-          if (abs(diff_x) < 20 && abs(diff_y) < 20){
-            cout << "\tClose enough! Shutting down the mover...\n";
-            xy_plotter_pipe.close_enough_mutex.unlock();
-//             detection_state = detectionState::DISH_TEMPLATE;
-          }
+          float confidence = pow(diff_x / kalman_R.at<float>(0,0),2) + pow(diff_y / kalman_R.at<float>(1,1),2);
+          cout << "Confidence: " << confidence << endl;
+          if (confidence <= CONFIDENCE_MIN){
+            // make sure we're confident long enough
+            if(confidence_counter++ >= CONFIDENCE_COUNTER_MIN){
+              cout << "\tClose enough! Shutting down the mover...\n";
+              xy_plotter_pipe.close_enough_mutex.unlock();
+
+              cout << "\n\nSwitching to template matching...\n\n";
+              detection_state = detectionState::DISH_OBB;
+              break;
+            } // if confidence_counter >= CONFIDENCE_CONTER_MIN
+          } // if confidence <= CONFIDENCE_MIN
+          else
+            confidence_counter = 0;
 
           xy_plotter_pipe.goal = cv::Point_<double>(diff_x * MM_PER_PIXEL_MOVEMENT,
                                                     diff_y * MM_PER_PIXEL_MOVEMENT);
+
+          posterior_mat = kalman_filter.predict(pointToMat(xy_plotter_pipe.goal));
+          posterior = matToPoint(kalman_filter.statePre);
+
           cout << "Unlocking the mover...\n";
           xy_plotter_pipe.goal_available_mutex.unlock();
-        }
+        } // if standing still
       }
 
       // display the dish posterior
@@ -632,31 +695,97 @@ int main(int argc, char* argv[]){
              5,
              cv::Scalar(0,0xFF,0xFF),
              -1);
+      // display the measurement confidence
+      cv::ellipse(display,
+                  posterior,
+                  cv::Size((int) 2*kalman_R.at<float>(0,0) * sqrt(CONFIDENCE_MIN),
+                           (int) 2*kalman_R.at<float>(1,1) * sqrt(CONFIDENCE_MIN)),
+                  0.0,
+                  0,
+                  360,
+                  cv::Scalar(0,0,0xFF),
+                  2,
+                  8);
+    }
+      break;
+    case detectionState::DISH_OBB:{
+      processing_image = alpha*processing_image - beta;
+
+      std::vector<Vec3f> circles;
+      cv::Point center_measurement;
+      int circles_found;
+
+      circles = findDrawCircles(processing_image,
+                                display,
+                                circles_found);
+
+      std::vector<cv::Point> centers;
+      for(int i = 0; i < circles_found; i++){
+        cell_center_buffer.push_back(cv::Point(cvRound(circles[i][0]),
+                                               cvRound(circles[i][1])));
+
+        if(cell_center_buffer.size() > CENTER_BUFFER_SIZE)
+          cell_center_buffer.erase(cell_center_buffer.begin());
+        }
+      cv::RotatedRect oriented_bounding_box = minAreaRect(cell_center_buffer);
+
+      cv::Point2f obb_points[4];
+      oriented_bounding_box.points(obb_points);
+
+      cv:Point2f obb_point_center = oriented_bounding_box.center;
+
+      double LAMBDA = sqrt(26.0/17.0);
+
+      for (int j=0; j < 4; j++)
+        obb_points[j] = obb_point_center + LAMBDA * (obb_points[j] - obb_point_center);
+
+      for (int j=0; j < 4; j++)
+        line(display,
+             obb_points[j],
+             obb_points[(j+1)%4],
+             cv::Scalar(0xFF,0,0),
+             3);
+
+      if (obb_counter++ >= OBB_COUNTER_MIN){
+        cout << "Adjusting Area of interest...\n";
+
+        cv::Rect bounding_rect = oriented_bounding_box.boundingRect;
+
+        cam_options_.aoiWidth = bounding_rect.width;
+        cam_options_.aoiHeight = bounding_rect.height;
+        cam_options_.aoiPosX = bounding_rect.x;
+        cam_options_.aoiPosY = bounding_rect.y;
+        cam::setAOI(cam_options_);
+
+        detection_state = detectionState::LARVAE_MOVEMENT;
+      }
     }
       break;
     case detectionState::DISH_TEMPLATE:{
+
+
       //////////////////// Template matching ////////////////////
       cv::Mat templ = imread(template_path_);
       cv::Rect dish_rectangle;
 
       bool found = false;
-      cv::Point match_point = matchDishTemplate(display,
+      cv::Point match_point = matchDishTemplate(processing_image,
                                                 templ,
                                                 found,
                                                 dish_rectangle,
-                                                CV_TM_CCOEFF,
+                                                CV_TM_SQDIFF, //CV_TM_CCORR,CV_TM_SQDIFF, CV_TM_CCOEFF, ..._NORMED
                                                 true);
 
       ////////// Crop the dish
-      cv::Mat croppedReference(display,
-                               dish_rectangle);
-      croppedReference.copyTo(dish);
+      // cv::Mat croppedReference(display,
+      //                          dish_rectangle);
+      // croppedReference.copyTo(dish);
 
-      populateDish (dish,
-                    5,
-                    0.25);
-      detectLarvae (dish,
-                    77);
+      // populateDish (dish,
+      //               5,
+      //               0.25);
+      // detectLarvae (dish,
+      //               77);
 
       cv:: rectangle (display,
                       match_point,
@@ -666,20 +795,12 @@ int main(int argc, char* argv[]){
                       2,
                       8,
                       0);
-
-      int cell_size = templ. rows / 2;
-
-      cv:: rectangle (display,
-                      dish_rectangle,
-                      YELLOW,
-                      2,
-                      8,
-                      0);
-    }
+      }
       break;
     case detectionState::LARVAE_MOVEMENT:
       break;
     }
+
 // FIXXME: Kind of sure these are the proper fps
 //////////////////// FPS display
     currentTime = Time::now();
@@ -714,12 +835,13 @@ int main(int argc, char* argv[]){
     //   cv::imshow("Dish",
     //              dish);
     // }
+
   }while(cv::waitKey(10) != KEY_ESCAPE);
 
 //////////////////// Cleanup and exit
 
 // Clean up the thread
-  xy_plotter_move.join();
+  xy_plotter_move.detach();
 
 //TODO: Return status of closing
   is_StopLiveVideo(cam_options_.camHandle,
@@ -746,8 +868,6 @@ int main(int argc, char* argv[]){
   std::ostringstream image_path, date, processed_image_path;
   time_t t = time(0);
   struct tm * now = localtime(&t);
-  image_path << "/tmp/"
-             << "zebrafish";
   date << (now->tm_year + 1900) << '-';
   if ((now->tm_mon + 1) < 10)
     date << '0';
@@ -758,8 +878,12 @@ int main(int argc, char* argv[]){
        << now->tm_hour << now->tm_min << now->tm_sec;
   image_path << "/tmp/zebrafish_" << date.str() << ".png";
   processed_image_path << "/tmp/zebrafish_detected_" << date.str() << ".png";
+
+  cout << "Saving grey image to " << image_path.str() << endl;;
   cv::imwrite(image_path.str(),
               greyImage);
+
+  cout << "Saving processed image to " << processed_image_path.str() << endl;
 
   cv::imwrite(processed_image_path.str(),
               display);
