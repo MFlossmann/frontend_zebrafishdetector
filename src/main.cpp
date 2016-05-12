@@ -444,7 +444,7 @@ int main(int argc, char* argv[]){
 //////////////////// Define trackbars ////////////////////
 //  std::string img_proc_win_name = "processed image";
   high_threshold_slider = 55;
-  alpha_slider = 11;
+  alpha_slider = 7;
   beta_slider = 44;
   max_radius_slider = 55;
   min_radius_slider = 6;
@@ -491,6 +491,8 @@ int main(int argc, char* argv[]){
   int confidence_counter = 0;
   int obb_counter = 0;
 
+  cv::Rect bounding_rect(cv::Point(0,0),
+                         cv::Size(0,0));
   float dish_angle = 0.0;
 
   // basically a FIFO buffer for the center points
@@ -625,9 +627,14 @@ int main(int argc, char* argv[]){
     }
 
 //////////////////////////////////////// Processing the image ////////////////////////////////////////
-    cout << "cloning...";
-    greyImage.copyTo(processing_image);
-    cout << " cloned!\n";
+    if (bounding_rect.width == 0)
+      greyImage.copyTo(processing_image);
+    else{
+      processing_image = cv::Mat(greyImage,
+                                 bounding_rect);
+      // to deepcopy the image data
+      processing_image = processing_image.clone();
+    }
     cv::medianBlur(processing_image,
                    processing_image,
                    5);
@@ -689,7 +696,7 @@ int main(int argc, char* argv[]){
               cout << "\tClose enough! Shutting down the mover...\n";
               xy_plotter_pipe.close_enough_mutex.unlock();
 
-              cout << "\n\nSwitching to template matching...\n\n";
+              cout << "\n\nSwitching to OBB detection...\n\n";
               detection_state = detectionState::DISH_OBB;
               break;
             } // if confidence_counter >= CONFIDENCE_CONTER_MIN
@@ -769,7 +776,7 @@ int main(int argc, char* argv[]){
         for(int j = 0; j < 4; j++)
           obb_point_vector.push_back(obb_points[j]);
 
-        cv::Rect bounding_rect = cv::boundingRect(obb_point_vector);
+        bounding_rect = cv::boundingRect(obb_point_vector);
 
         dish_angle = oriented_bounding_box.angle;
 
@@ -778,39 +785,39 @@ int main(int argc, char* argv[]){
         cam_options_.aoiPosX = bounding_rect.x;
         cam_options_.aoiPosY = bounding_rect.y;
 
-        cam_options_.undistortImage = false;
+        // FIXXME: Setting the camera AOI is currently quite prone to failure, therefore: Cropping the full image
+        // cam_options_.undistortImage = false;
 
-        cout << "Renitialize the buffers...\n";
-        cam::stop(cam_options_);
+        // cout << "Reinitialize the buffers...\n";
+        // cam::stop(cam_options_);
 
-        cout << "Adjusting Area of interest...";
-        cam::setAOI(cam_options_);
+        // cout << "Adjusting Area of interest...";
+        // cam::setAOI(cam_options_);
 
-        cam::initBuffers(cam_options_);
+        // cam::initBuffers(cam_options_);
 
-        cam::startVideoCapture(cam_options_);
+        // cam::startVideoCapture(cam_options_);
 
-        display.release();
-        display.create(cam_options_.aoiHeight,
-                       cam_options_.aoiWidth,
-                       CV_8UC3);
+        // greyImage.release();
+        // greyImage.create(cam_options_.aoiHeight,
+        //                  cam_options_.aoiWidth,
+        //                  CV_8UC1);
 
-        processing_image.release();
-        processing_image.create(cam_options_.aoiHeight,
-                                cam_options_.aoiWidth,
-                                CV_8UC1);
 
-        greyImage.release();
-        greyImage.create(cam_options_.aoiHeight,
-                         cam_options_.aoiWidth,
-                         CV_8UC1);
+        // display.release();
+
+        // processing_image.release();
 
         detection_state = detectionState::LARVAE_MOVEMENT;
       }
     }
       break;
     case detectionState::LARVAE_MOVEMENT:{
+      cout << "Rotating image " << dish_angle <<" degrees...\n";
 
+      rotate(display,
+             display,
+             dish_angle);
     }
       break;
     }

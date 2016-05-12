@@ -52,4 +52,8 @@ void populateDish(Mat &image,
 void detectLarvae(Mat &image,
                   int threshold);
 
+void rotate(const Mat &src,
+            Mat &dst,
+            double angle);
+
 //}

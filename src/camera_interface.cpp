@@ -115,10 +115,10 @@ int setAOI(cameraOptions &cam_options){
          sizeof(effectiveAreaOfInterest));
 
   cout << "Area of interest set: ("
-       << effectiveAreaOfInterest.s32X << ","
-       << effectiveAreaOfInterest.s32Y << "), "
-       << effectiveAreaOfInterest.s32Width << "x"
-       << effectiveAreaOfInterest.s32Height << endl;
+       << cam_options.aoiPosX << ","
+       << cam_options.aoiPosY << "), "
+       << cam_options.aoiWidth  << "x"
+       << cam_options.aoiHeight << endl;
 
   switch (cameraStatus){
   case IS_SUCCESS:

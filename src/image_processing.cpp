@@ -95,6 +95,7 @@ Point matchDishTemplate(const Mat &image,
 }
 
 void populateDish(Mat &image,
+                  RotatedRect dish,
                   int kernel_size,
                   double intensity){
   Mat temp = Mat::zeros(image.rows,
@@ -145,4 +146,13 @@ void detectLarvae(Mat &image,
                 threshold,
                 0xFF,
                 CV_THRESH_BINARY);
+}
+
+void rotate(const Mat &src,
+            Mat &dst,
+            double angle)
+{
+  Point2f pt(src.cols/2., src.rows/2.);
+  Mat r = getRotationMatrix2D(pt, angle, 1.0);
+  warpAffine(src, dst, r, Size(src.cols, src.rows));
 }
