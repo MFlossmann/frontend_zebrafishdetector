@@ -91,33 +91,44 @@ int setOptions(cameraOptions &cam_options){
 int setAOI(cameraOptions &cam_options){
   int cameraStatus;
 
-  cam_options.aoiWidth = cam_options.imageWidth / 2;
-  cam_options.aoiHeight = cam_options.imageHeight / 2;
-
-  cam_options.aoiPosX = (cam_options.imageWidth / 2) - (cam_options.aoiWidth / 2);
-  cam_options.aoiPosY = (cam_options.imageHeight / 2) - (cam_options.aoiHeight / 2);
-
   IS_RECT areaOfInterest;
+  cam_options.aoiWidth  += cam_options.aoiWidth % AOI_WIDTH_STEP_WIDTH;
+  cam_options.aoiHeight += cam_options.aoiHeight % AOI_HEIGHT_STEP_WITH;
+  cam_options.aoiPosX -= cam_options.aoiPosX % AOI_POSITION_GRID;
+  cam_options.aoiPosY -= cam_options.aoiPosY % AOI_POSITION_GRID;
+
   areaOfInterest.s32Width = cam_options.aoiWidth;
   areaOfInterest.s32Height = cam_options.aoiHeight;
-  areaOfInterest.s32X = cam_options.aoiPosX;
-  areaOfInterest.s32Y = cam_options.aoiPosY;
+  areaOfInterest.s32X = cam_options.aoiPosX; // | IS_AOI_IMAGE_POS_ABSOLUTE;
+  areaOfInterest.s32Y = cam_options.aoiPosY; // | IS_AOI_IMAGE_POS_ABSOLUTE;
 
   cameraStatus = is_AOI(cam_options.camHandle,
                         IS_AOI_IMAGE_SET_AOI,
                         (void*) &areaOfInterest,
                         sizeof(areaOfInterest));
 
+  IS_RECT effectiveAreaOfInterest;
+
+  is_AOI(cam_options.camHandle,
+         IS_AOI_IMAGE_GET_AOI,
+         (void*) & effectiveAreaOfInterest,
+         sizeof(effectiveAreaOfInterest));
+
+  cout << "Area of interest set: ("
+       << effectiveAreaOfInterest.s32X << ","
+       << effectiveAreaOfInterest.s32Y << "), "
+       << effectiveAreaOfInterest.s32Width << "x"
+       << effectiveAreaOfInterest.s32Height << endl;
+
   switch (cameraStatus){
   case IS_SUCCESS:
-          cout << "Area of interest set." << endl;
-          return CAM_SUCCESS;
+    return CAM_SUCCESS;
   case IS_INVALID_PARAMETER:
-          cout << "Error setting area of interest. Invalid parameter!" << endl;
-          return CAM_FAILURE;
+    cout << "Error setting area of interest. Invalid parameter!" << endl;
+    return CAM_FAILURE;
   default:
-          cout << "Error setting area of interest. Err no. " << cameraStatus << endl;
-          return CAM_FAILURE;
+    cout << "Error setting area of interest. Err no. " << cameraStatus << endl;
+    return CAM_FAILURE;
   } // switch cameraStatus
 } // setAOIas
 
@@ -225,6 +236,19 @@ int initBuffers(cameraOptions &cam_options){
       return 0;
   }
 
+  int stop(cameraOptions &cam_options){
+    int status = 0;
+
+    cam_options.imgPtrList.clear();
+    cam_options.imgIdList.clear();
+
+    status |= is_DisableEvent(cam_options.camHandle,
+                              IS_SET_EVENT_FRAME);
+    status |= is_ExitImageQueue(cam_options.camHandle);
+    status |= is_ClearSequence(cam_options.camHandle);
+
+    return status;
+  }
 
 void getCaptureStatus (UEYE_CAPTURE_STATUS_INFO capture_status_info){
   cout << "The following errors occured:" << endl;

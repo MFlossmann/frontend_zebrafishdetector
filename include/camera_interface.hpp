@@ -31,6 +31,11 @@ namespace cam{
   const int COLOR_DEPTH_CV = CV_8UC3;
   const int COLOR_DEPTH_CV_GREY = CV_8UC1;
 
+// Data from: https://en.ids-imaging.com/manuals/uEye_SDK/EN/uEye_Manual/index.html?hw_sensoren.html
+  const int AOI_WIDTH_STEP_WIDTH = 4;
+  const int AOI_HEIGHT_STEP_WITH = 2;
+  const int AOI_POSITION_GRID = 2;
+
 //////////////////// structs
   struct cameraOptions{
     cameraOptions(){
@@ -99,6 +104,8 @@ namespace cam{
 
   int freeBuffer(const cameraOptions &cam_options,
                  int current_buffer);
+
+  int stop(cameraOptions &cam_options);
 
   void getCaptureStatus(UEYE_CAPTURE_STATUS_INFO capture_status_info);
 }
