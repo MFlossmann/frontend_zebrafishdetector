@@ -5,10 +5,14 @@
 #include <iostream>
 #include <math.h>
 
+const double TAU = 6.283185307;
+// openCV doesn't follow the mathematicial standard that positive angles are counterclockwise => (-360.0)
+#define CV_DEG2RAD(x) (x * TAU/(-360.0))
+
 const int TEMPLATE_H_CELLS = 4;
 const int TEMPLATE_V_CELLS = 2;
-const int DISH_H_CELLS = 6;
-const int DISH_V_CELLS = 4;
+const float DISH_H_CELLS = 6.;
+const float DISH_V_CELLS = 4.;
 const int CELL_WIDTH = 60;
 
 using namespace cv;
@@ -17,6 +21,26 @@ struct imProcOptions{
   int cannyMaxThreshold;
   int centerDetectionThreshold;
 };
+
+// D-----C
+// |     |
+// A-----B
+// struct orientedBoundingBox{
+//   orientedBoundingBox();
+//   orientedBoundingBox(boundingRect bounding_rect);
+
+//   std::vector<Point> edges;
+
+//   Point* A,B,C,D;
+
+//   Point2f center;
+
+//   double angle;
+
+//   Size2f size;
+// };
+//typedef orientedBoundingBox obb;
+
 
 //namespace imgproc{
 //Mat createTemplate(Mat ringMatrix);
@@ -41,6 +65,7 @@ Point matchDishTemplate(const Mat &image,
                         bool show_result = false);
 
 void populateDish(Mat &image,
+                  Rect dish,
                   int kernel_size,
                   double intensity);
 
@@ -55,5 +80,9 @@ void detectLarvae(Mat &image,
 void rotate(const Mat &src,
             Mat &dst,
             double angle);
+
+Point rotateToNewSystem(Point point,
+                        double angle_deg,
+                        Rect new_system);
 
 //}

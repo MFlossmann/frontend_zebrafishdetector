@@ -1,34 +1,38 @@
 #include "image_processing.hpp"
 
+// oriented_bounding_box::oriented_bounding_box(boundingRect bounding_rect){
+//   cv::Point2f edges_raw[4];
+//   bounding_rect.points(edges_raw);
+//   edges.resize(4);
+//   if(bounding_rect.size.width < bounding_rect.size.height){
+//     edges[0] = edges_raw[1];
+//     edges[1] = edges_raw[0];
+//     edges[2] = edges_raw[3];
+//     edges[3] = edges_raw[2];
+
+//     size = Size2f(bounding_rect.size.y,
+//                   bounding_rect.size.x);
+
+//     angle = 90.0 + bounding_rect.angle;
+//   }
+//   else{
+//     edges[0] = edges_raw[0];
+//     edges[1] = edges_raw[3];
+//     edges[2] = edges_raw[2];
+//     edges[3] = edges_raw[1];
+
+//     size = bounding_rect.size;
+
+//     angle = bounding_rect.angle;
+//   }
+
+//   center = bounding_rect.center;
+// }
+
 void findDish(Mat &image,
               Rect){
 
 }
-
-// Mat createTemplate(Mat ringMatrix){
-//   Mat templ(CELL_WIDTH*TEMPLATE_V_CELLS,
-//             CELL_WIDTH*TEMPLATE_H_CELLS,
-//             CV_8UC1,
-//             Scalar(255));
-
-//   for (int row = 0; row < TEMPLATE_V_CELLS; row++){
-//     for (int col = 0; col < TEMPLATE_V_CELLS; col++){
-//       if(ringMatrix.at<int>(row,col)){
-//         int center_x = CELL_WIDTH * col + CELL_WIDTH/2;
-//         int center_y = CELL_WIDTH * row + CELL_WIDTH/2;
-
-//         circle(templ,
-//                Point(center_x,
-//                      center_y),
-//                CELL_WIDTH/2,
-//                Scalar(0),
-//                1);
-//       }
-//     } // col
-//   } // row
-
-//   return templ;
-// } // createTemplate
 
 Point matchDishTemplate(const Mat &image,
                         const Mat &templ,
@@ -95,15 +99,19 @@ Point matchDishTemplate(const Mat &image,
 }
 
 void populateDish(Mat &image,
-                  RotatedRect dish,
+                  Rect dish,
                   int kernel_size,
                   double intensity){
   Mat temp = Mat::zeros(image.rows,
-                         image.cols,
-                         image.type());
+                        image.cols,
+                        image.type());
+  std::cout << "Populating dish..." << std::endl;
+
+  double cell_width = 0.5*(dish.width/DISH_H_CELLS + dish.height/DISH_V_CELLS);
+
   // Help variables to help that the larvae end up in a square inside the cylinders
-  int b = CELL_WIDTH * sqrt(0.5);
-  int d = 0.5 * CELL_WIDTH * (1 - sqrt(0.5));
+  int b = cell_width * sqrt(0.5) * 0.9;
+  int d = 0.5*(cell_width - b);
 
   // only odd-valued kernel_sizes are allowed
   kernel_size += 1 - (kernel_size % 2);
@@ -116,9 +124,11 @@ void populateDish(Mat &image,
       int seed = 5*row + 3*col + 1;
       Point larva;
       srand(seed);
-      larva.x = rand() % b + d + CELL_WIDTH * col;
+      larva.x = rand() % b + d + cell_width * col;
       srand(seed + 1);
-      larva.y = rand() % b + d + CELL_WIDTH * row;
+      larva.y = rand() % b + d + cell_width * row;
+
+      larva += dish.tl();
 
       larvae.push_back(larva);
 
@@ -155,4 +165,20 @@ void rotate(const Mat &src,
   Point2f pt(src.cols/2., src.rows/2.);
   Mat r = getRotationMatrix2D(pt, angle, 1.0);
   warpAffine(src, dst, r, Size(src.cols, src.rows));
+}
+
+Point rotateToNewSystem(Point point,
+                        double angle_deg,
+                        Rect new_system){
+  point = point - new_system.tl();
+  Point pivot = 0.5*(new_system.br() - new_system.tl());
+
+  point -= pivot;
+  point = cv::Point(point.x*cos(CV_DEG2RAD(angle_deg)) -
+                    point.y*sin(CV_DEG2RAD(angle_deg)),
+                    point.x*sin(CV_DEG2RAD(angle_deg)) +
+                    point.y*cos(CV_DEG2RAD(angle_deg)));
+  point += pivot;
+
+  return point;
 }

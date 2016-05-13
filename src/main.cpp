@@ -94,10 +94,10 @@ imProcOptions improc_options_;
 simulationOptions sim_options_;
 bool stay;
 
-int high_threshold = 100;
-double max_radius = CELL_WIDTH * 0.9;
-double min_radius = CELL_WIDTH * 0.4;
-double alpha = 1.75;
+int high_threshold = 55;
+double max_radius = 33;//CELL_WIDTH * 0.9;
+double min_radius = 3.6;//CELL_WIDTH * 0.4;
+double alpha = 1.5;
 double beta = 44;
 
 int high_threshold_slider, alpha_slider, beta_slider, max_radius_slider, min_radius_slider;
@@ -250,6 +250,14 @@ cv::Mat pointToMat(cv::Point point){
 
   result.at<float>(0) = point.x;
   result.at<float>(1) = point.y;
+  return result;
+}
+
+cv::Mat pointToMat2f(cv::Point point){
+  cv::Mat result(2,1,CV_64F);
+
+  result.at<double>(0) = point.x;
+  result.at<double>(1) = point.y;
   return result;
 }
 
@@ -451,33 +459,34 @@ int main(int argc, char* argv[]){
 
   namedWindow(WINDOW_NAME,
               CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
-  createTrackbar("alpha",
-                 WINDOW_NAME,
-                 &alpha_slider,
-                 alpha_max,
-                 on_trackbar);
-  createTrackbar("beta",
-                 WINDOW_NAME,
-                 &beta_slider,
-                 beta_max,
-                 on_trackbar);
-  createTrackbar("High Threshold",
-                 WINDOW_NAME,
-                 &high_threshold_slider,
-                 high_threshold_max,
-                 on_trackbar);
-  createTrackbar("Max Radius",
-                 WINDOW_NAME,
-                 &max_radius_slider,
-                 max_radius_max,
-                 on_trackbar);
-  createTrackbar("Min Radius",
-                 WINDOW_NAME,
-                 &min_radius_slider,
-                 min_radius_max,
-                 on_trackbar);
+// FIXXXXME: Remove these (or make them optional)
+  // createTrackbar("alpha",
+  //                WINDOW_NAME,
+  //                &alpha_slider,
+  //                alpha_max,
+  //                on_trackbar);
+  // createTrackbar("beta",
+  //                WINDOW_NAME,
+  //                &beta_slider,
+  //                beta_max,
+  //                on_trackbar);
+  // createTrackbar("High Threshold",
+  //                WINDOW_NAME,
+  //                &high_threshold_slider,
+  //                high_threshold_max,
+  //                on_trackbar);
+  // createTrackbar("Max Radius",
+  //                WINDOW_NAME,
+  //                &max_radius_slider,
+  //                max_radius_max,
+  //                on_trackbar);
+  // createTrackbar("Min Radius",
+  //                WINDOW_NAME,
+  //                &min_radius_slider,
+  //                min_radius_max,
+  //                on_trackbar);
 
-//////////////////// FIXXXXXME: here comes the thread initialization
+//////////////////// Thread initialization ////////////////////
   cout << "Starting the xyPlotter moving thread...";
   std::thread xy_plotter_move(xyPlotterMove,
                               std::ref(xy_plotter),
@@ -486,13 +495,15 @@ int main(int argc, char* argv[]){
   xy_plotter_pipe.goal_available_mutex.lock();
   xy_plotter_pipe.close_enough_mutex.lock();
 
-//////////////////// InitImage capture loop ////////////////////
+//////////////////// Init Image capture loop ////////////////////
   detectionState detection_state = detectionState::DISH_LOCATION;
   int confidence_counter = 0;
   int obb_counter = 0;
 
   cv::Rect bounding_rect(cv::Point(0,0),
                          cv::Size(0,0));
+  cv::Rect dish_rectangle(cv::Point(0,0),
+                          cv::Size(0,0));
   float dish_angle = 0.0;
 
   // basically a FIFO buffer for the center points
@@ -764,12 +775,23 @@ int main(int argc, char* argv[]){
         obb_points[j] = obb_point_center + LAMBDA * (obb_points[j] - obb_point_center);
       }
 
-      for (int j=0; j < 4; j++)
+      for (int j=0; j < 4; j++){
         line(display,
              obb_points[j],
              obb_points[(j+1)%4],
              cv::Scalar(0xFF,0,0),
              3);
+        char letter[2];
+        letter[0] = 'A' + j;
+        letter[1] = '\0';
+        putText(display,
+                letter,
+                obb_points[j],
+                CV_FONT_HERSHEY_PLAIN,
+                3,
+                cv::Scalar(0xFF,0,0),
+                3);
+      }
 
       if (obb_counter++ >= OBB_COUNTER_MIN){
         std::vector<cv::Point> obb_point_vector;
@@ -778,12 +800,37 @@ int main(int argc, char* argv[]){
 
         bounding_rect = cv::boundingRect(obb_point_vector);
 
-        dish_angle = oriented_bounding_box.angle;
+        // top left point depends on how the dish is aligned
+        cv::Point obb_top_left, obb_bot_right;
+        if (oriented_bounding_box.size.width < oriented_bounding_box.size.height){
+          dish_angle = 90.0 - oriented_bounding_box.angle;
+          obb_top_left = obb_points[2];
+          obb_bot_right = obb_points[0];
+        } else {
+          dish_angle = oriented_bounding_box.angle;
+          obb_top_left = obb_points[1];
+          obb_bot_right = obb_points[3];
+        }
 
         cam_options_.aoiWidth = bounding_rect.width;
         cam_options_.aoiHeight = bounding_rect.height;
         cam_options_.aoiPosX = bounding_rect.x;
         cam_options_.aoiPosY = bounding_rect.y;
+
+//////////////////// Convert the rectangle containing the dish into the new turned system of reference (the bounding_rectangle)
+        // Top_left_new = rotate (top_left corner of the bounding rectangle - top_left of the obb)
+
+        {
+          cv::Point top_left_new = rotateToNewSystem(obb_top_left,
+                                                     dish_angle,
+                                                     bounding_rect);
+          cv::Point bot_right_new = rotateToNewSystem(obb_bot_right,
+                                                      dish_angle,
+                                                      bounding_rect);
+
+          dish_rectangle = cv::Rect(top_left_new,
+                                    bot_right_new);
+        }
 
         // FIXXME: Setting the camera AOI is currently quite prone to failure, therefore: Cropping the full image
         // cam_options_.undistortImage = false;
@@ -808,16 +855,26 @@ int main(int argc, char* argv[]){
 
         // processing_image.release();
 
+        cout << "Rotating image " << dish_angle <<" degrees...\n";
+        xy_plotter.setFrameRate(10.0);
         detection_state = detectionState::LARVAE_MOVEMENT;
       }
     }
       break;
     case detectionState::LARVAE_MOVEMENT:{
-      cout << "Rotating image " << dish_angle <<" degrees...\n";
-
       rotate(display,
              display,
              dish_angle);
+
+      rectangle(display,
+                dish_rectangle,
+                cv::Scalar(0xFF,0,0),
+                3);
+
+      populateDish(display,
+                   dish_rectangle,
+                   9,
+                   2.0);
     }
       break;
     }
