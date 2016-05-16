@@ -81,8 +81,31 @@ void rotate(const Mat &src,
             Mat &dst,
             double angle);
 
+void rotateToNewSystem(std::vector<std::vector<int> > &circle_buffer,
+                       double angle_deg,
+                       Rect new_system);
+
 Point rotateToNewSystem(Point point,
                         double angle_deg,
                         Rect new_system);
+
+void fillCircleBuffer(std::vector<vector <int> > &circle_buffer, // Array of 3-dimensional vectors
+                      std::vector<Vec3f> circles,
+                      int circles_found,
+                      float min_distance);
+
+std::vector<Point> getCenterVector(const std::vector<vector <int> > &circle_buffer);
+
+void drawCircleBuffer(Mat &display,
+                      const std::vector<vector <int> > &circle_buffer,
+                      Scalar color);
+
+void createGrid(Rect rectangle,
+                std::vector<std::vector<Point> > &edges,
+                std::vector<std::vector<Point> > &centers);
+
+void symmetricalStretch(Rect &rectangle,
+                        float factor_y,
+                        float factor_x=1.0);
 
 //}
