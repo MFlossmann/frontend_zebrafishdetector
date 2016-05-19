@@ -108,4 +108,8 @@ void symmetricalStretch(Rect &rectangle,
                         float factor_y,
                         float factor_x=1.0);
 
+Mat createMask(const Rect& cropping_rect,
+               const std::vector<std::vector<Point> > &centers,
+               int radius);
+
 //}

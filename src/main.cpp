@@ -59,20 +59,20 @@ const xyBaudRate BAUD_RATE = xyBaudRate::BAUD_115200;
 
 // Camera options
 const double DEFAULT_FRAMERATE = 1.0;
-const double DEFAULT_EXPOSURE_MS = 1.0;
-const double DEFAULT_FLASH_TIME = 0.20;
+const double DEFAULT_EXPOSURE_MS = .2;
+const double DEFAULT_FLASH_TIME = .1;
 const int RINGBUFFER_SIZE_DEFAULT = 10;
 
 const int IMAGE_TIMEOUT = 500;
 const int TIMEOUT_COUNTER_MAX = 10;
 
 // image processing
-const double ALPHA_MIN = 1.5;
-const double ALPHA_MAX = 1.7;
+const double ALPHA_MIN = 1.;
+const double ALPHA_MAX = 4.;
 const double BETA_MIN = 0;
-const double BETA_MAX = 100;
+const double BETA_MAX = 60;
 const int CANNY_MAX_DEFAULT = 80;
-const float STRETCH_FACTOR_Y = 1.10;
+const float STRETCH_FACTOR_Y = 1.1;
 const float STRETCH_FACTOR_X = 0.975;
 
 // colors
@@ -84,12 +84,13 @@ const cv::Scalar BLUE = cv::Scalar(0xFF,0,0);
 // GUI
 const int KEY_ESCAPE = 27;
 const std::string WINDOW_NAME = "Display Image (ESC to close)";
+const std::string PROCESS_WINDOW_NAME = "Processed window";
 
 const double MM_PER_PIXEL_MOVEMENT = 0.1;
 const float CONFIDENCE_MIN = 30; // Empirical
 
 const int CONFIDENCE_COUNTER_MIN = 4; // How long for the center to be in the sweet spot
-const int OBB_COUNTER_MIN = 30; // How long to look for the OBB
+const int OBB_COUNTER_MIN = 100; // How long to look for the OBB
 
 const int MIN_FOUND_CIRCLES = 3;
 
@@ -106,19 +107,23 @@ imProcOptions improc_options_;
 simulationOptions sim_options_;
 bool stay;
 
-int high_threshold = 55;
+int high_threshold = 35;
 double max_radius = 33;//CELL_WIDTH * 0.9;
 double min_radius = 15;//CELL_WIDTH * 0.4;
 double alpha = ALPHA_MIN;
-double beta = BETA_MAX;
+double beta = BETA_MIN;
+int kernel_size = 3;
+int blob_size = 3;
 
-int high_threshold_slider, alpha_slider, beta_slider, max_radius_slider, min_radius_slider;
+int high_threshold_slider, max_radius_slider, min_radius_slider, kernel_slider, blob_slider, alpha_slider, beta_slider;
 
 const int high_threshold_max = 255;
 const int max_radius_max = 100;
 const int min_radius_max = 100;
 const int alpha_max = 100;
-const int beta_max = 100;
+const int beta_max = 255;
+const int kernel_max = 27;
+const int blob_size_max = 20;
 
 
 //////////////////// functions
@@ -216,7 +221,7 @@ int parseOptions(int argc, char* argv[]){
 
 void readCalibrationParameters(cv::Mat &cameraMatrix,
                                cv::Mat &distCoeffs){
-  // FIXXXXXME: make this dynamic!!
+  // FIXXXME: make this dynamic!!
   cv::FileStorage fs(getBinPath() + UNDISTORT_FILE_DEFAULT, cv::FileStorage::READ);
 
   if (!fs.isOpened()){
@@ -232,19 +237,23 @@ void readCalibrationParameters(cv::Mat &cameraMatrix,
 }
 
 void on_trackbar( int, void*){
-  alpha = (double) (25)*alpha_slider/alpha_max;
-  beta = (double) 100*beta_slider/beta_max;
-
 //  max_radius = (double) CELL_WIDTH*max_radius_slider / max_radius_max;
 //  min_radius = (double) CELL_WIDTH*min_radius_slider / min_radius_max;
 
   high_threshold = high_threshold_slider;
 
-  cout << "\tα =\t" << alpha << endl
-       << "\tβ =\t" << beta << endl
-       << "\tmax_r =\t" << max_radius << endl
-       << "\tmin_r =\t" << min_radius << endl
-       << "threshold =\t" << high_threshold << endl;
+  kernel_size = kernel_slider + (1 - kernel_slider % 2);
+
+  blob_size = blob_slider;
+
+  alpha = alpha_slider * 0.1;
+  beta = beta_slider * (-1.0);
+
+  // cout << "\tα =\t" << alpha << endl
+  //      << "\tβ =\t" << beta << endl
+  //      << "\tmax_r =\t" << max_radius << endl
+  //      << "\tmin_r =\t" << min_radius << endl
+  //      << "threshold =\t" << high_threshold << endl;
 }
 
 std::vector<int> pointToVector(cv::Point point){
@@ -310,7 +319,7 @@ void xyPlotterMove(xyPlotter &xy_plotter,
     }
 
     xy_plotter.moveRel(xy_plotter_pipe.goal.x,
-                        xy_plotter_pipe.goal.y);
+                       xy_plotter_pipe.goal.y);
     xy_plotter_pipe.standing_still_mutex.unlock();
   }
 
@@ -413,7 +422,7 @@ int main(int argc, char* argv[]){
 
   bool simulation = sim_options_.sim_mode;
 
-//   cam_options_.captureMode = cam::captureModeEnum::HARDWARE_FREEZE;
+  cam_options_.captureMode = cam::captureModeEnum::HARDWARE_FREEZE;
   cam_options_.captureMode = cam::captureModeEnum::HARDWARE_LIVE;
   cam_options_.flashTime = DEFAULT_FLASH_TIME;
 
@@ -465,29 +474,20 @@ int main(int argc, char* argv[]){
 //////////////////// Define trackbars ////////////////////
 //  std::string img_proc_win_name = "processed image";
   high_threshold_slider = high_threshold;
-  alpha_slider = alpha_max * alpha / 25.;
-  beta_slider = beta_max * beta * 0.01;
   max_radius_slider = 55;
   min_radius_slider = 15;
 
   namedWindow(WINDOW_NAME,
               CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
+  cv::namedWindow(PROCESS_WINDOW_NAME,
+                  CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
+
 // FIXXXXME: Remove these (or make them optional)
-  // createTrackbar("alpha",
-  //                WINDOW_NAME,
-  //                &alpha_slider,
-  //                alpha_max,
-  //                on_trackbar);
-  // createTrackbar("beta",
-  //                WINDOW_NAME,
-  //                &beta_slider,
-  //                beta_max,
-  //                on_trackbar);
-  // createTrackbar("High Threshold",
-  //                WINDOW_NAME,
-  //                &high_threshold_slider,
-  //                high_threshold_max,
-  //                on_trackbar);
+  createTrackbar("High Threshold",
+                 WINDOW_NAME,
+                 &high_threshold_slider,
+                 high_threshold_max,
+                 on_trackbar);
   // createTrackbar("Max Radius",
   //                WINDOW_NAME,
   //                &max_radius_slider,
@@ -498,6 +498,21 @@ int main(int argc, char* argv[]){
   //                &min_radius_slider,
   //                min_radius_max,
   //                on_trackbar);
+  alpha = ALPHA_MIN;
+  alpha_slider = alpha * 10;
+  createTrackbar("α•10",
+                 WINDOW_NAME,
+                 &alpha_slider,
+                 alpha_max,
+                 on_trackbar);
+  beta = 0.;
+  beta_slider = beta * 10;
+  createTrackbar("β•10",
+                 WINDOW_NAME,
+                 &beta_slider,
+                 beta_max,
+                 on_trackbar);
+
 
 //////////////////// Thread initialization ////////////////////
   cout << "Starting the xyPlotter moving thread...";
@@ -528,7 +543,7 @@ int main(int argc, char* argv[]){
                     cam_options_.imageWidth,
                     CV_8UC1);
 
-  cv::Mat processing_image, display;
+  cv::Mat processing_image, display, mask;
 
   // init Kalman posterior belief
   cv::Point image_center(cam_options_.imageWidth/2,
@@ -601,13 +616,12 @@ int main(int argc, char* argv[]){
       if (captureStatus == IS_SUCCESS){ // Only copy if an image was received
 
 // copy the image memory to the openCV memory
-        // captureStatus = is_CopyImageMem(cam_options_.camHandle,
-        //                                 cam_options_.imgPtrList[currentImgIndex],
-        //                                 cam_options_.imgIdList[currentImgIndex],
-        //                                 reinterpret_cast<char*>(greyImage.data));
+        captureStatus = is_CopyImageMem(cam_options_.camHandle,
+                                        cam_options_.imgPtrList[currentImgIndex],
+                                        cam_options_.imgIdList[currentImgIndex],
+                                        reinterpret_cast<char*>(greyImage.data));
 
-        //(char*) greyImage.data);
-        greyImage.data = reinterpret_cast<uchar*>(cam_options_.imgPtrList[currentImgIndex]);
+        // greyImage.data = reinterpret_cast<uchar*>(cam_options_.imgPtrList[currentImgIndex]);
 
         captureStatus |= freeBuffer(cam_options_,
                                     currentImgIndex);
@@ -653,26 +667,38 @@ int main(int argc, char* argv[]){
     }
 
 //////////////////////////////////////// Processing the image ////////////////////////////////////////
-    if (cropping_rect.width == 0)
+// if dish not yet localized
+    if (cropping_rect.width == 0){
       greyImage.copyTo(processing_image);
+
+      cv::medianBlur(processing_image,
+                     processing_image,
+                     5);
+      // {
+      //   cv::Mat tmp = processing_image.clone();
+      //   cv::bilateralFilter(tmp,
+      //                       processing_image,
+      //                       5,
+      //                       50.,
+      //                       50.);
+      // }
+    } // end if dish not yet localized
     else{
       processing_image = cv::Mat(greyImage,
                                  cropping_rect);
       // to deepcopy the image data
       processing_image = processing_image.clone();
     }
-    cv::medianBlur(processing_image,
-                   processing_image,
-                   5);
-
-    processing_image = alpha*processing_image - beta;
-    processing_image.copyTo(display);
-    cv::cvtColor(display,
-                 display,
-                 CV_GRAY2RGB);
 
     switch (detection_state){
     case detectionState::DISH_LOCATION:{
+//////////////////// Contrast correction
+      processing_image = alpha*processing_image + beta;
+      processing_image.copyTo(display);
+      cv::cvtColor(display,
+                   display,
+                   CV_GRAY2RGB);
+
 //////////////////// Circle detection
       std::vector<Vec3f> circles;
       cv::Point center_measurement;
@@ -761,6 +787,19 @@ int main(int argc, char* argv[]){
     }
       break;
     case detectionState::DISH_OBB:{
+//////////////////// Contrast correction
+      // convertScaleAbs(processing_image,
+      //                 processing_image,
+      //                 alpha,
+      //                 beta);
+      processing_image = processing_image*alpha + beta;
+
+      processing_image.copyTo(display);
+      cv::cvtColor(display,
+                   display,
+                   CV_GRAY2RGB);
+
+//////////////////// Find the circles
       std::vector<Vec3f> circles;
       cv::Point center_measurement;
       int circles_found;
@@ -769,141 +808,169 @@ int main(int argc, char* argv[]){
                                 display,
                                 circles_found);
 
-      std::vector<cv::Point> centers;
+      if(circles_found > 0 ||
+         cell_circle_buffer.size() > 0){
+        std::vector<cv::Point> centers;
 
-      fillCircleBuffer(cell_circle_buffer,
-                       circles,
-                       circles_found,
-                       min_radius);
+        fillCircleBuffer(cell_circle_buffer,
+                         circles,
+                         circles_found,
+                         min_radius);
 
-      cout << "Circles in Buffer: " << cell_circle_buffer.size() << endl;
+        cout << "Circles in Buffer: " << cell_circle_buffer.size() << endl;
 
-      cv::RotatedRect oriented_bounding_box = minAreaRect(getCenterVector(cell_circle_buffer));
+        cv::RotatedRect oriented_bounding_box = minAreaRect(getCenterVector(cell_circle_buffer));
 
-      cv::Point2f obb_points[4];
-      oriented_bounding_box.points(obb_points);
+        cv::Point2f obb_points[4];
+        oriented_bounding_box.points(obb_points);
 
       cv:Point2f obb_point_center = oriented_bounding_box.center;
 
 
 //////////////////// Expand the rectangle to include the whole circles
-      double LAMBDA = sqrt(26.0/17.0);
+        double LAMBDA = sqrt(26.0/17.0);
 
-      for (int j=0; j < 4; j++){
-        obb_points[j] = obb_point_center + LAMBDA * (obb_points[j] - obb_point_center);
-      }
+        for (int j=0; j < 4; j++){
+          obb_points[j] = obb_point_center + LAMBDA * (obb_points[j] - obb_point_center);
+        }
 
 //////////////////// draw the stuff
 
-      drawCircleBuffer(display,
-                       cell_circle_buffer,
-                       cv::Scalar(0xFF,0,0));
+        drawCircleBuffer(display,
+                         cell_circle_buffer,
+                         cv::Scalar(0xFF,0,0));
 
-      for (int j=0; j < 4; j++){
-        line(display,
-             obb_points[j],
-             obb_points[(j+1)%4],
-             cv::Scalar(0xFF,0,0),
-             3);
-        char letter[2];
-        letter[0] = 'A' + j;
-        letter[1] = '\0';
-        putText(display,
-                letter,
-                obb_points[j],
-                CV_FONT_HERSHEY_PLAIN,
-                3,
-                cv::Scalar(0xFF,0,0),
-                3);
-      }
-
-      if (obb_counter++ >= OBB_COUNTER_MIN){
-        std::vector<cv::Point> obb_point_vector;
-        for(int j = 0; j < 4; j++)
-          obb_point_vector.push_back(obb_points[j]);
-
-        // the height is usually a bit too short => stretching symmetrically in the vertical
-        cropping_rect = cv::boundingRect(obb_point_vector);
-        symmetricalStretch(cropping_rect,
-                           STRETCH_FACTOR_Y,
-                           STRETCH_FACTOR_X);
-
-        // top left point depends on how the dish is aligned
-        cv::Point obb_top_left, obb_bot_right;
-        if (oriented_bounding_box.size.width < oriented_bounding_box.size.height){
-          dish_angle = 90.0 - oriented_bounding_box.angle;
-          obb_top_left = obb_points[2];
-          obb_bot_right = obb_points[0];
-        }
-        else {
-          dish_angle = oriented_bounding_box.angle;
-          obb_top_left = obb_points[1];
-          obb_bot_right = obb_points[3];
+        for (int j=0; j < 4; j++){
+          line(display,
+               obb_points[j],
+               obb_points[(j+1)%4],
+               cv::Scalar(0xFF,0,0),
+               3);
+          char letter[2];
+          letter[0] = 'A' + j;
+          letter[1] = '\0';
+          putText(display,
+                  letter,
+                  obb_points[j],
+                  CV_FONT_HERSHEY_PLAIN,
+                  3,
+                  cv::Scalar(0xFF,0,0),
+                  3);
         }
 
-        cam_options_.aoiWidth = cropping_rect.width;
-        cam_options_.aoiHeight = cropping_rect.height;
-        cam_options_.aoiPosX = cropping_rect.x;
-        cam_options_.aoiPosY = cropping_rect.y;
+        // if (false){
+       if (obb_counter++ >= OBB_COUNTER_MIN){
+          std::vector<cv::Point> obb_point_vector;
+          for(int j = 0; j < 4; j++)
+            obb_point_vector.push_back(obb_points[j]);
 
-//////////////////// Convert the rectangle containing the dish into the new turned system of reference (the cropping_rectangle)
-        // Top_left_new = rotate (top_left corner of the bounding rectangle - top_left of the obb)
-
-        {
-          cv::Point top_left_new = rotateToNewSystem(obb_top_left,
-                                                     dish_angle,
-                                                     cropping_rect);
-          cv::Point bot_right_new = rotateToNewSystem(obb_bot_right,
-                                                      dish_angle,
-                                                      cropping_rect);
-
-          rotateToNewSystem(cell_circle_buffer,
-                            dish_angle,
-                            cropping_rect);
-
-          dish_rectangle = cv::Rect(top_left_new,
-                                    bot_right_new);
-          symmetricalStretch(dish_rectangle,
+          // the height is usually a bit too short => stretching symmetrically in the vertical
+          cropping_rect = cv::boundingRect(obb_point_vector);
+          symmetricalStretch(cropping_rect,
                              STRETCH_FACTOR_Y,
                              STRETCH_FACTOR_X);
 
-          createGrid(dish_rectangle,
-                     edge_matrix,
-                     center_matrix);
-        }
+          // top left point depends on how the dish is aligned
+          cv::Point obb_top_left, obb_bot_right;
+          if (oriented_bounding_box.size.width < oriented_bounding_box.size.height){
+            dish_angle = 90.0 + oriented_bounding_box.angle;
+            obb_top_left = obb_points[2];
+            obb_bot_right = obb_points[0];
+          }
+          else {
+            dish_angle = oriented_bounding_box.angle;
+            obb_top_left = obb_points[1];
+            obb_bot_right = obb_points[3];
+          }
 
-        // FIXXME: Setting the camera AOI is currently quite prone to failure, therefore: Cropping the full image
-        // cam_options_.undistortImage = false;
+          cam_options_.aoiWidth = cropping_rect.width;
+          cam_options_.aoiHeight = cropping_rect.height;
+          cam_options_.aoiPosX = cropping_rect.x;
+          cam_options_.aoiPosY = cropping_rect.y;
 
-        // cout << "Reinitialize the buffers...\n";
-        // cam::stop(cam_options_);
+//////////////////// Convert the rectangle containing the dish into the new turned system of reference (the cropping_rectangle)
+          // Top_left_new = rotate (top_left corner of the bounding rectangle - top_left of the obb)
 
-        // cout << "Adjusting Area of interest...";
-        // cam::setAOI(cam_options_);
+          {
+            cv::Point top_left_new = rotateToNewSystem(obb_top_left,
+                                                       dish_angle,
+                                                       cropping_rect);
+            cv::Point bot_right_new = rotateToNewSystem(obb_bot_right,
+                                                        dish_angle,
+                                                        cropping_rect);
 
-        // cam::initBuffers(cam_options_);
+            rotateToNewSystem(cell_circle_buffer,
+                              dish_angle,
+                              cropping_rect);
 
-        // cam::startVideoCapture(cam_options_);
+            dish_rectangle = cv::Rect(top_left_new,
+                                      bot_right_new);
+            symmetricalStretch(dish_rectangle,
+                               STRETCH_FACTOR_Y,
+                               STRETCH_FACTOR_X);
 
-        // greyImage.release();
-        // greyImage.create(cam_options_.aoiHeight,
-        //                  cam_options_.aoiWidth,
-        //                  CV_8UC1);
+            createGrid(dish_rectangle,
+                       edge_matrix,
+                       center_matrix);
+
+            mask = createMask(cropping_rect,
+                              center_matrix,
+                              27);
+          }
+
+          // FIXXME: Setting the camera AOI is currently quite prone to failure, therefore: Cropping the full image
+          // cam_options_.undistortImage = false;
+
+          // cout << "Reinitialize the buffers...\n";
+          // cam::stop(cam_options_);
+
+          // cout << "Adjusting Area of interest...";
+          // cam::setAOI(cam_options_);
+
+          // cam::initBuffers(cam_options_);
+
+          // cam::startVideoCapture(cam_options_);
+
+          // greyImage.release();
+          // greyImage.create(cam_options_.aoiHeight,
+          //                  cam_options_.aoiWidth,
+          //                  CV_8UC1);
 
 
-        // display.release();
+          // display.release();
 
-        // processing_image.release();
+          // processing_image.release();
 
-        cout << "Rotating image " << dish_angle <<" degrees...\n";
-        xy_plotter.setFrameRate(10.0);
-        detection_state = detectionState::LARVAE_MOVEMENT;
-      } // end if obb detection counter minimum reached
-      else {
-        // increase alpha stepwise to detect every circle
-        alpha += (ALPHA_MAX - ALPHA_MIN) / ((double) OBB_COUNTER_MIN);
-        beta -= (BETA_MAX - BETA_MIN) / ((double) OBB_COUNTER_MIN);
-      }
+          createTrackbar("Blob size",
+                         WINDOW_NAME,
+                         &blob_slider,
+                         blob_size_max,
+                         on_trackbar);
+          createTrackbar("High Threshold",
+                         WINDOW_NAME,
+                         &high_threshold_slider,
+                         high_threshold_max,
+                         on_trackbar);
+          createTrackbar("Kernel size",
+                         WINDOW_NAME,
+                         &kernel_slider,
+                         kernel_max,
+                         on_trackbar);
+
+          cout << "Rotating image " << dish_angle <<" degrees...\n";
+          xy_plotter.setFrameRate(10.0);
+
+          detection_state = detectionState::LARVAE_MOVEMENT;
+        } // end if obb detection counter minimum reached
+        else {
+         // increase alpha stepwise to detect every circle
+         alpha += (ALPHA_MAX - ALPHA_MIN) / ((double) OBB_COUNTER_MIN);
+         beta -= (BETA_MAX - BETA_MIN) / ((double) OBB_COUNTER_MIN);
+
+         cout << "α = " << alpha << endl
+              << "β = " << beta <<endl;;
+        } // not yet finished detecting all circles
+      } // end if circles found
     }
       break;
     case detectionState::LARVAE_MOVEMENT:{
@@ -911,23 +978,45 @@ int main(int argc, char* argv[]){
              processing_image,
              dish_angle);
 
-      // GaussianBlur(processing_image,
-      //              processing_image,
-      //              cv::Size(3,3),
-      //              0,0,
-      //              BORDER_DEFAULT);
-
       // threshold(processing_image,
       //           processing_image,
       //           high_threshold,
       //           255,
       //           CV_THRESH_BINARY);
 
-      // Laplacian(processing_image,
-      //           processing_image,
-      //           CV_16S,
-      //           3,
-      //           BORDER_DEFAULT);
+//////////////////// LoG algorithm
+      // adjust the contrast
+      convertScaleAbs(processing_image,
+                      processing_image,
+                      alpha,
+                      beta);
+
+      processing_image = processing_image - mask;
+      {
+        cv::Mat tmp;
+        processing_image.copyTo(tmp);
+
+        processing_image = cv::Mat(tmp.rows * 2,
+                                   tmp.cols * 2,
+                                   tmp.type());
+        resize(tmp,
+               processing_image,
+               processing_image.size(),
+               0,
+               0);
+      }
+      double sigma = (double) (blob_size - 1.0) / 3.0;
+      GaussianBlur(processing_image,
+                   processing_image,
+                   cv::Size(kernel_size,kernel_size),
+                   sigma,
+                   sigma,
+                   BORDER_DEFAULT);
+      Laplacian(processing_image,
+                processing_image,
+                CV_16S,
+                3,
+                BORDER_DEFAULT);
 
       // populateDish(processing_image,
       //              dish_rectangle,
@@ -935,7 +1024,10 @@ int main(int argc, char* argv[]){
       //              3.0);
 
       convertScaleAbs(processing_image,
-                      display);
+                      processing_image);
+
+      display = processing_image.clone();
+
       cv::cvtColor(display,
                    display,
                    CV_GRAY2RGB);
@@ -949,15 +1041,16 @@ int main(int argc, char* argv[]){
       //                  cell_circle_buffer,
       //                  BLUE);
 
-      for (int i=0; i < center_matrix.size(); i++){
-        for (int j=0; j < center_matrix[i].size(); j++){
-          circle(display,
-                 center_matrix[i][j],
-                 3,
-                 GREEN,
-                 -1);
-        }
-      }
+// draw the centers
+      // for (int i=0; i < center_matrix.size(); i++){
+      //   for (int j=0; j < center_matrix[i].size(); j++){
+      //     circle(display,
+      //            center_matrix[i][j],
+      //            3,
+      //            GREEN,
+      //            -1);
+      //   }
+      // }
 
     }
       break;
@@ -986,9 +1079,7 @@ int main(int argc, char* argv[]){
     cv::imshow(WINDOW_NAME,
                display);
 
-    cv::namedWindow("Image capture",
-                    CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
-    cv::imshow("Image capture",
+    cv::imshow(PROCESS_WINDOW_NAME,
                greyImage);
 
     // if (found){
@@ -1045,6 +1136,8 @@ int main(int argc, char* argv[]){
 
   cv::imwrite(processed_image_path.str(),
               display);
+
+  cv::waitKey(30);
 
   cout << "Saving grey image to " << image_path.str() << endl;;
   cv::imwrite(image_path.str(),

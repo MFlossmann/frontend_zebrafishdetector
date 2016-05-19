@@ -306,3 +306,32 @@ void symmetricalStretch(Rect &rectangle,
   }
 
 }
+
+Mat createMask(const Rect& cropping_rect,
+               const std::vector<std::vector<Point> > &centers,
+               int radius){
+  Mat mask = Mat::zeros(cropping_rect.height,
+                        cropping_rect.width,
+                        CV_8UC1);
+
+  for(int i=0; i < centers.size(); i++){
+    for(int j=0; j< centers[i].size(); j++){
+      circle(mask,
+             centers[i][j],
+             radius,
+             Scalar(0xFF),
+             -1);
+    }
+  }
+
+  GaussianBlur(mask,
+               mask,
+               Size(9,9),
+               0,0,
+               BORDER_DEFAULT);
+
+  bitwise_not(mask,
+              mask);
+
+  return mask;
+}
