@@ -98,7 +98,8 @@ std::vector<Point> getCenterVector(const std::vector<vector <int> > &circle_buff
 
 void drawCircleBuffer(Mat &display,
                       const std::vector<vector <int> > &circle_buffer,
-                      Scalar color);
+                      Scalar color,
+                      bool draw_radius = false);
 
 void createGrid(Rect rectangle,
                 std::vector<std::vector<Point> > &edges,

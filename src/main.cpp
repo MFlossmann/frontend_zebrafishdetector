@@ -67,13 +67,13 @@ const int IMAGE_TIMEOUT = 500;
 const int TIMEOUT_COUNTER_MAX = 10;
 
 // image processing
-const double ALPHA_MIN = 1.;
-const double ALPHA_MAX = 4.;
+const double ALPHA_MIN = 2.5;
+const double ALPHA_MAX = 6.;
 const double BETA_MIN = 0;
-const double BETA_MAX = 60;
+const double BETA_MAX = 50;
 const int CANNY_MAX_DEFAULT = 80;
-const float STRETCH_FACTOR_Y = 1.1;
-const float STRETCH_FACTOR_X = 0.975;
+const float STRETCH_FACTOR_Y = 1.05;
+const float STRETCH_FACTOR_X = 0.95;
 
 // colors
 const cv::Scalar YELLOW = cv::Scalar(0,0xFF,0xFF);
@@ -113,7 +113,7 @@ double min_radius = 15;//CELL_WIDTH * 0.4;
 double alpha = ALPHA_MIN;
 double beta = BETA_MIN;
 int kernel_size = 3;
-int blob_size = 3;
+int blob_size = 5;
 
 int high_threshold_slider, max_radius_slider, min_radius_slider, kernel_slider, blob_slider, alpha_slider, beta_slider;
 
@@ -244,7 +244,7 @@ void on_trackbar( int, void*){
 
   kernel_size = kernel_slider + (1 - kernel_slider % 2);
 
-  blob_size = blob_slider;
+  blob_slider = blob_size;
 
   alpha = alpha_slider * 0.1;
   beta = beta_slider * (-1.0);
@@ -543,7 +543,7 @@ int main(int argc, char* argv[]){
                     cam_options_.imageWidth,
                     CV_8UC1);
 
-  cv::Mat processing_image, display, mask;
+  cv::Mat processing_image, display, mask, control_image;
 
   // init Kalman posterior belief
   cv::Point image_center(cam_options_.imageWidth/2,
@@ -670,6 +670,7 @@ int main(int argc, char* argv[]){
 // if dish not yet localized
     if (cropping_rect.width == 0){
       greyImage.copyTo(processing_image);
+      control_image = greyImage;
 
       cv::medianBlur(processing_image,
                      processing_image,
@@ -694,6 +695,7 @@ int main(int argc, char* argv[]){
     case detectionState::DISH_LOCATION:{
 //////////////////// Contrast correction
       processing_image = alpha*processing_image + beta;
+
       processing_image.copyTo(display);
       cv::cvtColor(display,
                    display,
@@ -915,7 +917,19 @@ int main(int argc, char* argv[]){
 
             mask = createMask(cropping_rect,
                               center_matrix,
-                              27);
+                              26);//27);
+            // {
+            //   cv::Mat tmp;
+            //   mask.copyTo(tmp);
+            //   mask = cv::Mat(tmp.rows * 2,
+            //                  tmp.cols * 2,
+            //                  tmp.type());
+            //   resize(tmp,
+            //          mask,
+            //          mask.size(),
+            //          0,
+            //          0);
+            // }
           }
 
           // FIXXME: Setting the camera AOI is currently quite prone to failure, therefore: Cropping the full image
@@ -985,61 +999,120 @@ int main(int argc, char* argv[]){
       //           CV_THRESH_BINARY);
 
 //////////////////// LoG algorithm
+      cv::medianBlur(processing_image,
+                     processing_image,
+                     5);
+
       // adjust the contrast
       convertScaleAbs(processing_image,
                       processing_image,
                       alpha,
                       beta);
+      processing_image.copyTo(control_image);
 
-      processing_image = processing_image - mask;
-      {
-        cv::Mat tmp;
-        processing_image.copyTo(tmp);
-
-        processing_image = cv::Mat(tmp.rows * 2,
-                                   tmp.cols * 2,
-                                   tmp.type());
-        resize(tmp,
-               processing_image,
-               processing_image.size(),
-               0,
-               0);
-      }
+      // {
+      //   cv::Mat tmp;
+      //   processing_image.copyTo(tmp);
+      //   processing_image = cv::Mat(tmp.rows * 2,
+      //                              tmp.cols * 2,
+      //                              tmp.type());
+      //   resize(tmp,
+      //          processing_image,
+      //          processing_image.size(),
+      //          0,
+      //          0);
+      // }
+// FIXXXXME: These values should be stored somewhere
       double sigma = (double) (blob_size - 1.0) / 3.0;
+      kernel_size = 3 + blob_size * 2.2222; // 2.2222 = 20./9. based on opencv::getGaussianKernel computation + 2
+      kernel_size += 1 - kernel_size % 2; // kernel_size should be odd!
+      // high_threshold = 149;
       GaussianBlur(processing_image,
                    processing_image,
                    cv::Size(kernel_size,kernel_size),
                    sigma,
                    sigma,
                    BORDER_DEFAULT);
+
+// To remove the white reflection hotspots
+      cv::Mat hotspot_filter(processing_image.rows,
+                                processing_image.cols,
+                                processing_image.type());
+      threshold(processing_image,
+                hotspot_filter,
+                149, // high_threshold
+                0xFF,
+                THRESH_BINARY);
+
       Laplacian(processing_image,
                 processing_image,
                 CV_16S,
                 3,
                 BORDER_DEFAULT);
 
-      // populateDish(processing_image,
-      //              dish_rectangle,
-      //              11,
-      //              3.0);
-
       convertScaleAbs(processing_image,
-                      processing_image);
+                      processing_image,
+                      sigma*sigma); // Scale normalization for LoG
 
+      processing_image = processing_image - mask; // concentrate only on the cells
+      processing_image = processing_image - hotspot_filter;
+
+      // Prepare the image
       display = processing_image.clone();
-
       cv::cvtColor(display,
                    display,
                    CV_GRAY2RGB);
 
-      rectangle(display,
-                dish_rectangle,
-                cv::Scalar(0xFF,0,0),
-                3);
+// Find larvae
+      {
+        cv::Mat tmp = processing_image.clone();
+        threshold(tmp,
+                  processing_image,
+                  high_threshold,
+                  0xFF,
+                  THRESH_TOZERO);
+      }
+      std::vector<std::vector<cv::Point> > contours;
+      std::vector<Vec4i> hierarchy;
 
-      // drawCircleBuffer(display,
-      //                  cell_circle_buffer,
-      //                  BLUE);
+      // findContours(processing_image,
+      //              contours,
+      //              hierarchy,
+      //              CV_RETR_TREE,
+      //              CV_CHAIN_APPROX_SIMPLE);
+      // for(int i=0;i<contours.size(); i++){
+      //   drawContours(display,
+      //                contours,
+      //                i,
+      //                RED,
+      //                2,
+      //                8,
+      //                hierarchy,
+      //                0,
+      //                Point());
+      // }
+      for (int row = 0; row < 4; row++){
+        cv::Point larva;
+        cv::Mat cell_mask = cv::Mat::zeros(processing_image.size(),
+                                           CV_8UC1);
+        // only get the leftmost column for now
+        cell_mask(Rect(edge_matrix[0][0 + row],
+                       edge_matrix[1][1 + row])) = 1;
+
+        minMaxLoc(processing_image,
+                  NULL,NULL, // min/max-val reference
+                  NULL,   // minLoc reference
+                  &larva,
+                  cell_mask);
+        circle(display,
+               larva,
+               2,
+               RED,
+               -1);
+}
+      namedWindow("Narf");
+      cv::imshow("Narf",
+                 processing_image);
 
 // draw the centers
       // for (int i=0; i < center_matrix.size(); i++){
@@ -1080,7 +1153,7 @@ int main(int argc, char* argv[]){
                display);
 
     cv::imshow(PROCESS_WINDOW_NAME,
-               greyImage);
+               control_image);
 
     // if (found){
     //   cv::namedWindow("Dish",

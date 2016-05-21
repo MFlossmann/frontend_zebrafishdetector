@@ -248,8 +248,9 @@ std::vector<Point> getCenterVector(const std::vector<vector <int> > &circle_buff
 
 void drawCircleBuffer(Mat &display,
                       const std::vector<vector <int > > &circle_buffer,
-                      Scalar color){
-  for (int i=0; i < circle_buffer.size(); i++)
+                      Scalar color,
+                      bool draw_radius){
+  for (int i=0; i < circle_buffer.size(); i++){
     circle(display,
            Point(circle_buffer[i][0],
                  circle_buffer[i][1]),
@@ -258,6 +259,16 @@ void drawCircleBuffer(Mat &display,
            -1,
            8,
            0);
+    if (draw_radius)
+      circle(display,
+             Point(circle_buffer[i][0],
+                   circle_buffer[i][1]),
+             circle_buffer[i][2],
+             color,
+             2,
+             8,
+             0);
+  }
 }
 
 void createGrid(Rect rectangle,
@@ -288,9 +299,12 @@ void createGrid(Rect rectangle,
                                         + rect_offset);
     } // end rows
     edges.push_back(current_edge_vector);
+    current_edge_vector.clear();
 
-    if (col != DISH_H_CELLS)
+    if (col != DISH_H_CELLS){
       centers.push_back(current_center_vector);
+      current_center_vector.clear();
+    }
   } // end columns
 }
 
